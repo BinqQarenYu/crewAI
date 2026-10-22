@@ -1,0 +1,8 @@
+{
+  "name": "CrewAI Studio & Documentation",
+  "description": "Interactive Multi-Agent Automation Framework, Documentation, Flow Builder, and Control Plane for CrewAI.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

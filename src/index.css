@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --primary: #EB6658;
+    --primary-light: #F3A78B;
+    --primary-dark: #C94C3C;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(235, 102, 88, 0.6);
+}
