@@ -60,6 +60,7 @@ export interface TaskConfig {
   expectedOutput: string;
   agentId: string;
   controllerAgentId?: string;
+  dependsOnTaskIds?: string[];
   phase?: string;
   asyncExecution?: boolean;
   humanReview?: boolean;

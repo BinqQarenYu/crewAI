@@ -1,4 +1,4 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-call "%~dp0start.bat" %*
+call "%~dp0standalone.bat" %*

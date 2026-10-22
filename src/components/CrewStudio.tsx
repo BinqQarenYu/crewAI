@@ -55,6 +55,7 @@ import { RemoteControlModule } from './RemoteControlModule';
 import { SpoonFeedTopBar, ContextualGuideBubble, SpoonFeedStep } from './SpoonFeedGuideBanner';
 import { CardMinMaxButtons } from './CardMinMaxControl';
 import { CrewExecutionProgressBar, LiveTaskExecutionItem, LiveTaskExecStatus } from './CrewExecutionProgressBar';
+import { TaskDependencyGraphVisualizer } from './TaskDependencyGraphVisualizer';
 import { CURATED_TARGET_REPOS, resolveRepoWorkforceProfile } from '../utils/repoWorkforceMapping';
 import { emitJulesPrNotification } from '../utils/prNotifications';
 import { globalTaskThrottler } from '../utils/taskThrottler';
@@ -1693,6 +1694,11 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
         savedAt: new Date().toISOString()
       };
       localStorage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify(payload));
+      window.dispatchEvent(
+        new CustomEvent('crewai:workflow-synced', {
+          detail: { ...payload, source: 'crew_studio' }
+        })
+      );
       setLastSaved(new Date().toLocaleTimeString());
       setSaveStatus('saved');
     } catch (e) {
@@ -1700,6 +1706,22 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
       setSaveStatus('idle');
     }
   }, [activePreset, crew, selectedAgentId, runInput]);
+
+  // Listen to external workflow sync events (e.g. from UnifiedGraphAlignmentBar or LangGraph)
+  useEffect(() => {
+    const handleExternalSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || detail.source === 'crew_studio') return;
+      if (detail.crew && Array.isArray(detail.crew.agents)) {
+        setActivePreset(detail.activePreset || 'full_stack_app');
+        setCrew(detail.crew);
+        if (detail.selectedAgentId) setSelectedAgentId(detail.selectedAgentId);
+        if (detail.runInput) setRunInput(detail.runInput);
+      }
+    };
+    window.addEventListener('crewai:workflow-synced', handleExternalSync);
+    return () => window.removeEventListener('crewai:workflow-synced', handleExternalSync);
+  }, []);
 
   // Debounced Auto-Save on any workflow changes (1.2 seconds after last edit)
   useEffect(() => {
@@ -1753,6 +1775,11 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
           savedAt: new Date().toISOString()
         };
         localStorage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify(payload));
+        window.dispatchEvent(
+          new CustomEvent('crewai:workflow-synced', {
+            detail: { ...payload, source: 'crew_studio' }
+          })
+        );
         setLastSaved(new Date().toLocaleTimeString());
         setSaveStatus('saved');
       } catch {
@@ -1815,6 +1842,34 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
     } catch (e: any) {
       console.error('Export error:', e);
       showNotification('error', `Failed to export workflow: ${e.message}`);
+    }
+  };
+
+  // Download Self-Extracting Full-Stack Windows standalone.bat via Blob (works inside sandboxed iframes)
+  const handleDownloadStandaloneBat = async () => {
+    try {
+      showNotification('success', 'Building self-extracting standalone.bat (Frontend + Backend + .env)...');
+      const res = await fetch('/api/standalone/bat?includeEnv=1');
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+      const batText = await res.text();
+      const blob = new Blob([batText], { type: 'application/x-bat;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'standalone.bat';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showNotification(
+        'success',
+        'Downloaded standalone.bat! Double-click it in any folder on Windows to unpack & launch the full app on http://localhost:3000.'
+      );
+    } catch (err: any) {
+      console.error('standalone.bat download error:', err);
+      showNotification('error', `Failed to download standalone.bat: ${err.message || 'Unknown error'}`);
     }
   };
 
@@ -2606,13 +2661,18 @@ ${crew.agents
   })
   .join('\n\n')}
 
-# --- Tasks Setup (Controlled Pipeline & Acceptance Gates) ---
+# --- Tasks Setup (Controlled Pipeline, Dependency DAG & Acceptance Gates) ---
 ${crew.tasks
-  .map((t) => {
+  .map((t, idx) => {
     const phaseNote = t.phase ? `    # ${t.phase}${t.controllerAgentId ? ` | Controlled by: ${t.controllerAgentId}` : ''}\n` : '';
+    const validIds = new Set(crew.tasks.slice(0, idx).map((prev) => prev.id));
+    const depVars = (t.dependsOnTaskIds || [])
+      .filter((dId) => validIds.has(dId))
+      .map((dId) => dId.replace(/-/g, '_'));
+    const contextLine = depVars.length > 0 ? `,\n    context=[${depVars.join(', ')}]` : '';
     return `${t.id.replace(/-/g, '_')} = Task(\n${phaseNote}    description="""${t.description}""",
     expected_output="""${t.expectedOutput}""",
-    agent=${t.agentId.replace(/-/g, '_')}
+    agent=${t.agentId.replace(/-/g, '_')}${contextLine}
 )`;
   })
   .join('\n\n')}
@@ -2655,14 +2715,16 @@ if __name__ == "__main__":
           allow_delegation: a.allowDelegation
         }
       })),
-      tasks: crew.tasks.map((t) => ({
+      tasks: crew.tasks.map((t, idx) => ({
         id: t.id,
+        sequence_order: idx + 1,
         name: t.name,
         phase: t.phase,
         description: t.description,
         expected_output: t.expectedOutput,
         agent: t.agentId,
         controller_agent: t.controllerAgentId,
+        depends_on: t.dependsOnTaskIds || (idx > 0 ? [crew.tasks[idx - 1].id] : []),
         output_format: t.outputFormat
       }))
     };
@@ -2862,16 +2924,16 @@ if __name__ == "__main__":
             <span className="hidden sm:inline">Export JSON</span>
           </button>
 
-          {/* Download Standalone Windows .BAT Launcher */}
-          <a
-            href="/api/standalone/bat"
-            download="start.bat"
-            title="Download updated start.bat to launch CrewAI Studio as a standalone Windows desktop app"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-medium transition shadow-sm"
+          {/* Download Self-Extracting Full-Stack Windows standalone.bat */}
+          <button
+            type="button"
+            onClick={handleDownloadStandaloneBat}
+            title="Download self-extracting standalone.bat containing the complete identical Frontend (src/**) + Backend (server.ts) + .env configuration"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 hover:text-white border border-cyan-500/40 text-xs font-semibold transition shadow-sm cursor-pointer"
           >
             <Laptop className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline">Standalone .BAT</span>
-          </a>
+            <span className="hidden sm:inline">standalone.bat (Full App)</span>
+          </button>
 
           {/* Execution History Button */}
           <button
@@ -4512,6 +4574,23 @@ if __name__ == "__main__":
                 </button>
               }
             />
+
+          {/* Interactive Task Dependency & Execution Sequence Graph Visualizer */}
+          <TaskDependencyGraphVisualizer
+            tasks={crew.tasks}
+            agents={crew.agents}
+            processMode={crew.process}
+            isRunning={isRunning}
+            activeTaskId={activeExecTaskId}
+            taskExecutions={taskExecutions}
+            onUpdateTasks={(updatedTasks) => {
+              setCrew((c) => ({
+                ...c,
+                tasks: updatedTasks
+              }));
+            }}
+            onNotify={showNotification}
+          />
 
           <div
             className={`p-5 rounded-2xl bg-slate-900/40 border space-y-4 transition ${

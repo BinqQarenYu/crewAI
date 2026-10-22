@@ -625,6 +625,38 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
     }
   };
 
+  // Download Self-Extracting Full-Stack Windows standalone.bat via Blob (works inside sandboxed iframes)
+  const handleDownloadStandaloneBat = async () => {
+    try {
+      setStatusMessage({
+        type: 'info',
+        text: 'Building self-extracting standalone.bat (Full Frontend + Backend + .env archive)...'
+      });
+      const res = await fetch('/api/standalone/bat?includeEnv=1');
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+      const batText = await res.text();
+      const blob = new Blob([batText], { type: 'application/x-bat;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'standalone.bat';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addLog('[STANDALONE.BAT] Downloaded self-extracting full-stack Windows launcher (Frontend + Backend + .env).');
+      setStatusMessage({
+        type: 'success',
+        text: 'Downloaded standalone.bat! Double-click it in any folder on Windows to unpack & launch the full app on http://localhost:3000.'
+      });
+    } catch (e: any) {
+      addLog(`[STANDALONE.BAT ERROR] ${e.message}`);
+      setStatusMessage({ type: 'error', text: `Failed to download standalone.bat: ${e.message}` });
+    }
+  };
+
   const maskedCurrentToken = token
     ? `${token.slice(0, 7)}••••••••••••${token.slice(-4)}`
     : user?.isServerSide
@@ -1077,6 +1109,16 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
             >
               <DownloadCloud className="w-3.5 h-3.5 text-sky-400" />
               <span>{isLoading ? 'Pulling...' : 'Git Pull'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadStandaloneBat}
+              title="Download self-extracting standalone.bat with complete Frontend + Backend + .env bundled inside"
+              className="px-3.5 py-2 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-cyan-500/40 cursor-pointer"
+            >
+              <DownloadCloud className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Download standalone.bat (Full Front + Back)</span>
             </button>
 
             <a

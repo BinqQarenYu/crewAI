@@ -1,379 +1,85 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
-  GitFork, 
-  Search, 
-  Copy, 
-  Check, 
-  Maximize2, 
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  GitFork,
+  Search,
+  Copy,
+  Check,
+  Maximize2,
   Minimize2,
-  RotateCcw, 
-  Code2, 
-  Cpu, 
+  RotateCcw,
+  Code2,
+  Cpu,
   Boxes,
   ZoomIn,
   ZoomOut,
   Hand,
   Compass,
   Move,
-  Crosshair
+  Crosshair,
+  Network,
+  GitMerge,
+  Layers,
+  UserCheck
 } from 'lucide-react';
+import { CrewConfig } from '../types';
+import { PRESET_CREWS } from './CrewStudio';
+import {
+  GraphifyAlignedModule,
+  WORKFLOW_AUTOSAVE_KEY,
+  buildAlignedGraphifyModules
+} from '../utils/unifiedGraphEngine';
 
-export interface RepoNode {
-  id: string;
-  name: string;
-  path: string;
-  layer: 'entry' | 'ui' | 'data' | 'types' | 'config';
-  layerLabel: string;
-  type: 'component' | 'store' | 'types' | 'config' | 'root';
-  loc: number;
-  description: string;
-  inbound: string[]; // files that import this
-  outbound: string[]; // files this imports
-  exports: string[];
-  x: number;
-  y: number;
-}
-
-const INITIAL_NODES: RepoNode[] = [
-  // Entry & Root
-  {
-    id: 'index-html',
-    name: 'index.html',
-    path: '/index.html',
-    layer: 'config',
-    layerLabel: 'Host & HTML',
-    type: 'config',
-    loc: 24,
-    description: 'HTML5 entry point specifying meta tags, responsive viewport, and dark background styling.',
-    inbound: [],
-    outbound: ['main-tsx'],
-    exports: ['<div id="root">'],
-    x: 50,
-    y: 160
-  },
-  {
-    id: 'main-tsx',
-    name: 'main.tsx',
-    path: '/src/main.tsx',
-    layer: 'entry',
-    layerLabel: 'Bootstrap Entry',
-    type: 'root',
-    loc: 14,
-    description: 'React 19 root bootstrap mounting App inside document.getElementById("root").',
-    inbound: ['index-html'],
-    outbound: ['app-tsx'],
-    exports: ['ReactDOM.render'],
-    x: 270,
-    y: 160
-  },
-  {
-    id: 'app-tsx',
-    name: 'App.tsx',
-    path: '/src/App.tsx',
-    layer: 'ui',
-    layerLabel: 'Root Orchestrator',
-    type: 'component',
-    loc: 218,
-    description: 'Master application component managing tabs, LangGraph & CrewAI studio views, notifications, modals, and responsive layout.',
-    inbound: ['main-tsx'],
-    outbound: [
-      'navbar-tsx',
-      'crewstudio-tsx',
-      'langgraph-tsx',
-      'flowvisualizer-tsx',
-      'githubhub-tsx',
-      'ollamapool-tsx',
-      'docviewer-tsx',
-      'toolscatalog-tsx',
-      'traceviewer-tsx',
-      'notificationcenter-tsx',
-      'types-ts',
-      'docscontent-ts'
-    ],
-    exports: ['App (default)'],
-    x: 500,
-    y: 220
-  },
-
-  // Components Layer
-  {
-    id: 'navbar-tsx',
-    name: 'Navbar.tsx',
-    path: '/src/components/Navbar.tsx',
-    layer: 'ui',
-    layerLabel: 'Navigation',
-    type: 'component',
-    loc: 245,
-    description: 'Top header navigation bar featuring CrewStudio, Graphs, Flow & Graphify, PR Notification Center, and Ollama pool controls.',
-    inbound: ['app-tsx'],
-    outbound: ['types-ts', 'notificationcenter-tsx'],
-    exports: ['Navbar'],
-    x: 790,
-    y: 30
-  },
-  {
-    id: 'crewstudio-tsx',
-    name: 'CrewStudio.tsx',
-    path: '/src/components/CrewStudio.tsx',
-    layer: 'ui',
-    layerLabel: 'Studio Engine',
-    type: 'component',
-    loc: 899,
-    description: 'Interactive multi-agent workbench with agent builder, task pipeline, live telemetry simulator, and code exporter.',
-    inbound: ['app-tsx'],
-    outbound: ['types-ts', 'toolscatalog-ts'],
-    exports: ['CrewStudio'],
-    x: 790,
-    y: 120
-  },
-  {
-    id: 'langgraph-tsx',
-    name: 'LangGraphView.tsx',
-    path: '/src/components/LangGraphView.tsx',
-    layer: 'ui',
-    layerLabel: 'Stateful Graphs',
-    type: 'component',
-    loc: 940,
-    description: 'Interactive LangGraph multi-actor state machine topology with dynamic pan/zoom, cyclic feedback routing, and thread checkpoints.',
-    inbound: ['app-tsx'],
-    outbound: ['types-ts'],
-    exports: ['LangGraphView'],
-    x: 790,
-    y: 210
-  },
-  {
-    id: 'flowvisualizer-tsx',
-    name: 'FlowVisualizer.tsx',
-    path: '/src/components/FlowVisualizer.tsx',
-    layer: 'ui',
-    layerLabel: 'Workflow & Graph',
-    type: 'component',
-    loc: 520,
-    description: 'Visual event-driven DAG execution engine supporting @start, @listen, and @router lifecycle steps with Graphify integration.',
-    inbound: ['app-tsx'],
-    outbound: ['types-ts'],
-    exports: ['FlowVisualizer'],
-    x: 790,
-    y: 300
-  },
-  {
-    id: 'githubhub-tsx',
-    name: 'GitHubHub.tsx',
-    path: '/src/components/GitHubHub.tsx',
-    layer: 'ui',
-    layerLabel: 'GitHub Sync Hub',
-    type: 'component',
-    loc: 480,
-    description: 'Complete GitHub access: OAuth popup flow, PAT authentication, Git Pull tree browser, and Git Push commit engine.',
-    inbound: ['app-tsx'],
-    outbound: [],
-    exports: ['GitHubHub'],
-    x: 790,
-    y: 390
-  },
-  {
-    id: 'ollamapool-tsx',
-    name: 'OllamaPoolModal.tsx',
-    path: '/src/components/OllamaPoolModal.tsx',
-    layer: 'ui',
-    layerLabel: 'Ollama Hardware & Cloud',
-    type: 'component',
-    loc: 460,
-    description: 'Local PC Ollama model scanner with /api/tags discovery, hybrid cloud priority failover, and credit flow simulation.',
-    inbound: ['app-tsx'],
-    outbound: [],
-    exports: ['OllamaPoolModal'],
-    x: 790,
-    y: 480
-  },
-  {
-    id: 'docviewer-tsx',
-    name: 'DocViewer.tsx',
-    path: '/src/components/DocViewer.tsx',
-    layer: 'ui',
-    layerLabel: 'Documentation',
-    type: 'component',
-    loc: 320,
-    description: 'Aspen Mintlify-style markdown document renderer with code groups, syntax styling, and breadcrumbs.',
-    inbound: ['app-tsx'],
-    outbound: ['types-ts'],
-    exports: ['DocViewer'],
-    x: 790,
-    y: 570
-  },
-  {
-    id: 'toolscatalog-tsx',
-    name: 'ToolsCatalogView.tsx',
-    path: '/src/components/ToolsCatalogView.tsx',
-    layer: 'ui',
-    layerLabel: 'Tools Directory',
-    type: 'component',
-    loc: 180,
-    description: 'Searchable directory of 18+ CrewAI tools categorized by capability with copyable Python imports.',
-    inbound: ['app-tsx'],
-    outbound: ['toolscatalog-ts'],
-    exports: ['ToolsCatalogView'],
-    x: 790,
-    y: 660
-  },
-  {
-    id: 'traceviewer-tsx',
-    name: 'TraceViewer.tsx',
-    path: '/src/components/TraceViewer.tsx',
-    layer: 'ui',
-    layerLabel: 'Observability',
-    type: 'component',
-    loc: 240,
-    description: 'OpenTelemetry waterfall timeline, token telemetry audits, and sub-millisecond span inspector.',
-    inbound: ['app-tsx'],
-    outbound: [],
-    exports: ['TraceViewer'],
-    x: 790,
-    y: 750
-  },
-  {
-    id: 'notificationcenter-tsx',
-    name: 'NotificationCenter.tsx',
-    path: '/src/components/NotificationCenter.tsx',
-    layer: 'ui',
-    layerLabel: 'PR Toast Center',
-    type: 'component',
-    loc: 275,
-    description: 'Real-time notification center and floating toast stack for Google Jules autonomous PR completions.',
-    inbound: ['app-tsx', 'navbar-tsx'],
-    outbound: ['types-ts'],
-    exports: ['NotificationCenter'],
-    x: 790,
-    y: 840
-  },
-
-  // Data & Contracts Layer
-  {
-    id: 'docscontent-ts',
-    name: 'docsContent.ts',
-    path: '/src/data/docsContent.ts',
-    layer: 'data',
-    layerLabel: 'Content & Knowledge',
-    type: 'store',
-    loc: 798,
-    description: 'Structured documentation chapters covering Getting Started, Concepts, Ollama Pool, Guides, and API Reference.',
-    inbound: ['app-tsx'],
-    outbound: ['types-ts'],
-    exports: ['DOC_SECTIONS'],
-    x: 1120,
-    y: 160
-  },
-  {
-    id: 'toolscatalog-ts',
-    name: 'toolsCatalog.ts',
-    path: '/src/data/toolsCatalog.ts',
-    layer: 'data',
-    layerLabel: 'Tools Specs',
-    type: 'store',
-    loc: 220,
-    description: 'Specifications, environment keys, and execution snippets for Serper, ScrapeWebsite, Firecrawl, CodeInterpreter, etc.',
-    inbound: ['crewstudio-tsx', 'toolscatalog-tsx'],
-    outbound: [],
-    exports: ['TOOLS_CATALOG', 'ToolItem'],
-    x: 1120,
-    y: 300
-  },
-  {
-    id: 'types-ts',
-    name: 'types.ts',
-    path: '/src/types.ts',
-    layer: 'types',
-    layerLabel: 'Type Contracts',
-    type: 'types',
-    loc: 110,
-    description: 'TypeScript domain contracts for Agents, Crews, Tasks, LangGraph State, Execution Logs, Flows, and Doc Pages.',
-    inbound: [
-      'app-tsx',
-      'navbar-tsx',
-      'docviewer-tsx',
-      'crewstudio-tsx',
-      'langgraph-tsx',
-      'flowvisualizer-tsx',
-      'notificationcenter-tsx',
-      'docscontent-ts'
-    ],
-    outbound: [],
-    exports: ['DocTab', 'AgentConfig', 'TaskConfig', 'CrewConfig', 'ExecutionLog', 'FlowNode', 'FlowState'],
-    x: 1120,
-    y: 440
-  },
-
-  // System & Config Layer
-  {
-    id: 'server-ts',
-    name: 'server.ts',
-    path: '/server.ts',
-    layer: 'config',
-    layerLabel: 'Full-Stack Server',
-    type: 'config',
-    loc: 280,
-    description: 'Express backend serving GitHub OAuth, token exchange, file push proxy, Slack/Discord webhook dispatch, and Vite middleware.',
-    inbound: [],
-    outbound: [],
-    exports: ['ExpressServer'],
-    x: 270,
-    y: 380
-  },
-  {
-    id: 'package-json',
-    name: 'package.json',
-    path: '/package.json',
-    layer: 'config',
-    layerLabel: 'Package & Scripts',
-    type: 'config',
-    loc: 35,
-    description: 'Node.js dependency manifest (React 19, Express, Vite 6, Tailwind CSS 4, Lucide React).',
-    inbound: [],
-    outbound: [],
-    exports: ['scripts.dev', 'scripts.build'],
-    x: 270,
-    y: 490
-  },
-  {
-    id: 'start-bat',
-    name: 'start.bat',
-    path: '/start.bat',
-    layer: 'config',
-    layerLabel: 'Automated Launcher',
-    type: 'config',
-    loc: 54,
-    description: '1-click Windows standalone launcher: checks Node.js, configures .env, installs packages, and launches browser.',
-    inbound: [],
-    outbound: [],
-    exports: ['start.bat'],
-    x: 270,
-    y: 600
-  }
-];
+export type RepoNode = GraphifyAlignedModule;
 
 export interface GraphifyRepoVisualizerProps {
   onTaskJules?: (node: RepoNode) => void;
   selectedRepo: string;
   selectedBranch: string;
+  focusedModuleId?: string | null;
+  onOpenLangGraphNode?: (langGraphNodeId: string) => void;
+  onOpenFlowStep?: (taskId?: string) => void;
+  onOpenCrewStudio?: () => void;
 }
 
-export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({ 
+export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
   onTaskJules,
   selectedRepo,
-  selectedBranch
+  selectedBranch,
+  focusedModuleId,
+  onOpenLangGraphNode,
+  onOpenFlowStep,
+  onOpenCrewStudio
 }) => {
-  const [nodes, setNodes] = useState<RepoNode[]>(INITIAL_NODES);
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('app-tsx');
+  const loadActiveCrew = useCallback((): CrewConfig => {
+    try {
+      const raw = localStorage.getItem(WORKFLOW_AUTOSAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.crew?.agents?.length > 0) {
+          return parsed.crew;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return PRESET_CREWS.full_stack_app;
+  }, []);
+
+  const [activeCrew, setActiveCrew] = useState<CrewConfig>(loadActiveCrew);
+  const alignedModules = useMemo(() => buildAlignedGraphifyModules(activeCrew), [activeCrew]);
+
+  const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
+  const [selectedNodeId, setSelectedNodeId] = useState<string>(focusedModuleId || 'unified-graph-engine-ts');
   const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedLayer, setSelectedLayer] = useState<string>('all');
-  
-  // Interactive Pan, Zoom & Drag State (matching LangGraphView)
+  const [selectedAgentFilter, setSelectedAgentFilter] = useState<string>('all');
+
+  // Interactive Pan, Zoom & Drag State
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 24, y: 18 });
-  const [zoom, setZoom] = useState<number>(0.88);
+  const [zoom, setZoom] = useState<number>(0.86);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [hasCustomNodePositions, setHasCustomNodePositions] = useState<boolean>(false);
 
   const pointerStartRef = useRef<{
     clientX: number;
@@ -386,15 +92,49 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
     clientY: 0,
     originX: 0,
     originY: 0,
-    moved: false,
+    moved: false
   });
 
-  // Fullscreen & CLI state
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [copiedCli, setCopiedCli] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[2];
+
+  // Merge base aligned modules with any user drag position overrides
+  const nodes: RepoNode[] = useMemo(() => {
+    return alignedModules.map((mod) => {
+      const override = positionOverrides[mod.id];
+      return override ? { ...mod, x: override.x, y: override.y } : mod;
+    });
+  }, [alignedModules, positionOverrides]);
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[0];
+
+  // Sync with active Crew changes across tabs
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.crew) {
+        setActiveCrew(detail.crew);
+      } else {
+        setActiveCrew(loadActiveCrew());
+      }
+    };
+    window.addEventListener('crewai:workflow-synced', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('crewai:workflow-synced', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [loadActiveCrew]);
+
+  // Focus module when requested from LangGraph or Flow DAG
+  useEffect(() => {
+    if (focusedModuleId && nodes.some((n) => n.id === focusedModuleId)) {
+      setSelectedNodeId(focusedModuleId);
+      handleCenterOnNode(focusedModuleId);
+    }
+  }, [focusedModuleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cursor-centered Mouse Wheel Zoom
   useEffect(() => {
@@ -423,38 +163,34 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
     return () => container.removeEventListener('wheel', handleWheel);
   }, []);
 
-  // Global Mouse Move / Mouse Up for smooth canvas panning and node dragging
-  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
-    if (!isPanning && !draggingNodeId) return;
+  const handleGlobalMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isPanning && !draggingNodeId) return;
 
-    const dx = e.clientX - pointerStartRef.current.clientX;
-    const dy = e.clientY - pointerStartRef.current.clientY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-      pointerStartRef.current.moved = true;
-    }
+      const dx = e.clientX - pointerStartRef.current.clientX;
+      const dy = e.clientY - pointerStartRef.current.clientY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        pointerStartRef.current.moved = true;
+      }
 
-    if (isPanning) {
-      setPan({
-        x: Math.round(pointerStartRef.current.originX + dx),
-        y: Math.round(pointerStartRef.current.originY + dy),
-      });
-    } else if (draggingNodeId) {
-      const scaledDx = dx / zoom;
-      const scaledDy = dy / zoom;
-      setNodes((prevNodes) =>
-        prevNodes.map((node) =>
-          node.id === draggingNodeId
-            ? {
-                ...node,
-                x: Math.max(10, Math.min(1650, Math.round(pointerStartRef.current.originX + scaledDx))),
-                y: Math.max(10, Math.min(1150, Math.round(pointerStartRef.current.originY + scaledDy))),
-              }
-            : node
-        )
-      );
-      setHasCustomNodePositions(true);
-    }
-  }, [isPanning, draggingNodeId, zoom]);
+      if (isPanning) {
+        setPan({
+          x: Math.round(pointerStartRef.current.originX + dx),
+          y: Math.round(pointerStartRef.current.originY + dy)
+        });
+      } else if (draggingNodeId) {
+        const scaledDx = dx / zoom;
+        const scaledDy = dy / zoom;
+        const nextX = Math.max(10, Math.min(1650, Math.round(pointerStartRef.current.originX + scaledDx)));
+        const nextY = Math.max(10, Math.min(1150, Math.round(pointerStartRef.current.originY + scaledDy)));
+        setPositionOverrides((prev) => ({
+          ...prev,
+          [draggingNodeId]: { x: nextX, y: nextY }
+        }));
+      }
+    },
+    [isPanning, draggingNodeId, zoom]
+  );
 
   const handleGlobalMouseUp = useCallback(() => {
     setIsPanning(false);
@@ -472,7 +208,6 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
     }
   }, [isPanning, draggingNodeId, handleGlobalMouseMove, handleGlobalMouseUp]);
 
-  // Start Canvas Panning on Background MouseDown
   const handleMouseDownCanvas = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     setIsPanning(true);
@@ -481,11 +216,10 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
       clientY: e.clientY,
       originX: pan.x,
       originY: pan.y,
-      moved: false,
+      moved: false
     };
   };
 
-  // Start Node Dragging on Node MouseDown
   const handleNodeMouseDown = (e: React.MouseEvent, node: RepoNode) => {
     e.stopPropagation();
     if (e.button !== 0) return;
@@ -496,11 +230,10 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
       clientY: e.clientY,
       originX: node.x,
       originY: node.y,
-      moved: false,
+      moved: false
     };
   };
 
-  // Viewport Helpers
   const handleZoomBy = (delta: number) => {
     const container = containerRef.current;
     const centerX = container ? container.clientWidth / 2 : 420;
@@ -511,7 +244,7 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
       const scaleRatio = nextZoom / prevZoom;
       setPan((prevPan) => ({
         x: Math.round(centerX - (centerX - prevPan.x) * scaleRatio),
-        y: Math.round(centerY - (centerY - prevPan.y) * scaleRatio),
+        y: Math.round(centerY - (centerY - prevPan.y) * scaleRatio)
       }));
       return nextZoom;
     });
@@ -519,7 +252,7 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
 
   const handleFitView = () => {
     setPan({ x: 24, y: 18 });
-    setZoom(0.88);
+    setZoom(0.86);
   };
 
   const handleCenterOnNode = (nodeId?: string) => {
@@ -532,25 +265,32 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
     const centerY = container.clientHeight / 2;
     setZoom(targetZoom);
     setPan({
-      x: Math.round(centerX - (target.x + 95) * targetZoom),
-      y: Math.round(centerY - (target.y + 38) * targetZoom),
+      x: Math.round(centerX - (target.x + 100) * targetZoom),
+      y: Math.round(centerY - (target.y + 42) * targetZoom)
     });
   };
 
   const handleResetNodeLayout = () => {
-    setNodes(INITIAL_NODES);
-    setHasCustomNodePositions(false);
+    setPositionOverrides({});
     handleFitView();
   };
 
-  // Filtering
+  const hasCustomNodePositions = Object.keys(positionOverrides).length > 0;
+
+  // Filtering by layer, assigned agent, and search query
   const filteredNodes = nodes.filter((node) => {
     const matchesLayer = selectedLayer === 'all' || node.layer === selectedLayer;
+    const matchesAgent =
+      selectedAgentFilter === 'all' || node.assignedAgentId === selectedAgentFilter;
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
-      node.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      node.path.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      node.description.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesLayer && matchesSearch;
+      !q ||
+      node.name.toLowerCase().includes(q) ||
+      node.path.toLowerCase().includes(q) ||
+      node.description.toLowerCase().includes(q) ||
+      (node.assignedAgentName || '').toLowerCase().includes(q) ||
+      (node.alignedTaskName || '').toLowerCase().includes(q);
+    return matchesLayer && matchesAgent && matchesSearch;
   });
 
   const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
@@ -574,25 +314,28 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
 
   const graphifyCliCommand = `git clone https://github.com/Graphify-Labs/graphify.git
 pip install -e graphify
-python -m graphify scan . --output repo_graph.json --visualize`;
+python -m graphify scan . --crew "${activeCrew.name}" --output repo_graph.json --visualize`;
 
   return (
-    <div className={`space-y-6 ${isFullscreen ? 'fixed inset-0 z-50 bg-[#0B0F19] p-6 overflow-y-auto' : ''}`}>
+    <div className={`space-y-5 ${isFullscreen ? 'fixed inset-0 z-50 bg-[#0B0F19] p-6 overflow-y-auto' : ''}`}>
       {/* Top Controls Bar */}
       <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-[#EB6658]/20 to-[#EB6658]/5 text-[#EB6658] border border-[#EB6658]/30">
+          <div className="p-2 rounded-xl bg-[#EB6658]/15 text-[#EB6658] border border-[#EB6658]/30">
             <GitFork className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-white">Graphify: {selectedRepo} Architecture</h2>
-              <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-[#EB6658]/15 text-[#EB6658] border border-[#EB6658]/30 font-semibold">
-                Branch: {selectedBranch}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-bold text-white">
+                Graphify Repository Knowledge Graph ({selectedRepo})
+              </h2>
+              <span className="text-slate-600" aria-hidden="true">·</span>
+              <span className="text-xs font-mono text-emerald-400">
+                Aligned with {activeCrew.name} ({activeCrew.agents.length} Agents · {nodes.length} Modules)
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Drag background to pan, scroll wheel to zoom toward cursor, or drag any module card to reorganize the architecture graph.
+            <p className="text-xs text-slate-400 mt-0.5">
+              Every repository file is mapped to its governing CrewAI Agent, LangGraph Actor node, and Event Flow decorator.
             </p>
           </div>
         </div>
@@ -603,7 +346,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
             <input
               type="text"
-              placeholder="Filter file / module..."
+              placeholder="Filter module, agent, task..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-slate-950 border border-slate-700 text-xs text-slate-200 placeholder-slate-500 pl-8 pr-3 py-1.5 rounded-lg outline-none focus:border-[#EB6658]"
@@ -611,21 +354,36 @@ python -m graphify scan . --output repo_graph.json --visualize`;
           </div>
 
           <select
+            aria-label="Filter by Assigned CrewAI Agent / LangGraph Actor"
+            value={selectedAgentFilter}
+            onChange={(e) => setSelectedAgentFilter(e.target.value)}
+            className="bg-slate-950 text-xs text-slate-300 font-medium px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-[#EB6658] cursor-pointer"
+          >
+            <option value="all">All Assigned Agents ({activeCrew.agents.length})</option>
+            {activeCrew.agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name} — {agent.role}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Filter by Architectural Layer"
             value={selectedLayer}
             onChange={(e) => setSelectedLayer(e.target.value)}
-            className="bg-slate-950 text-xs text-slate-300 font-medium px-3 py-1.5 rounded-lg border border-slate-700 outline-none"
+            className="bg-slate-950 text-xs text-slate-300 font-medium px-3 py-1.5 rounded-lg border border-slate-700 outline-none focus:border-[#EB6658] cursor-pointer"
           >
             <option value="all">All Layers ({nodes.length})</option>
             <option value="entry">Entry & Bootstrap</option>
-            <option value="ui">UI Components</option>
-            <option value="data">Data & Knowledge</option>
+            <option value="ui">UI & Graph Views</option>
+            <option value="data">Data & Graph Engine</option>
             <option value="types">Types & Contracts</option>
-            <option value="config">Config & Build</option>
+            <option value="config">Backend & Standalone</option>
           </select>
 
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer"
+            className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
             title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Canvas'}
           >
             {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -643,7 +401,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
           onDoubleClick={handleFitView}
           className={`lg:col-span-8 rounded-2xl border border-slate-800 bg-[#070A12] overflow-hidden flex flex-col relative select-none ${
             isPanning ? 'cursor-grabbing' : 'cursor-grab'
-          } ${isFullscreen ? 'h-[80vh]' : 'h-[660px]'}`}
+          } ${isFullscreen ? 'h-[80vh]' : 'h-[680px]'}`}
         >
           {/* Dynamic Grid Background with Pan & Zoom */}
           <div
@@ -658,17 +416,17 @@ python -m graphify scan . --output repo_graph.json --visualize`;
 
           {/* Top-Left Gesture Hints */}
           <div className="absolute top-3 left-3 z-30 pointer-events-none flex items-center gap-2 flex-wrap">
-            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 shadow-md backdrop-blur-sm">
+            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5">
               <Hand className="w-3 h-3 text-[#EB6658]" />
-              <span>Drag Canvas to Pan</span>
+              <span>Drag to Pan</span>
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 shadow-md backdrop-blur-sm">
+            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 tabular-nums">
               <Compass className="w-3 h-3 text-sky-400" />
-              <span>Wheel to Zoom ({Math.round(zoom * 100)}%)</span>
+              <span>Zoom ({Math.round(zoom * 100)}%)</span>
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 shadow-md backdrop-blur-sm">
+            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5">
               <Move className="w-3 h-3 text-emerald-400" />
-              <span>Drag Any Module Card</span>
+              <span>Drag Modules</span>
             </span>
           </div>
 
@@ -676,7 +434,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
           <div
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="absolute top-3 right-3 z-30 flex items-center gap-1 bg-slate-900/95 border border-slate-800 rounded-xl p-1 shadow-xl backdrop-blur-md"
+            className="absolute top-3 right-3 z-30 flex items-center gap-1 bg-slate-900/95 border border-slate-800 rounded-xl p-1 shadow-xl"
           >
             <button
               onClick={() => handleZoomBy(-0.15)}
@@ -688,7 +446,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
             <button
               onClick={() => setZoom(1)}
               title="Reset Zoom to 100%"
-              className="px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-[#EB6658] hover:bg-slate-800 transition min-w-[46px] text-center cursor-pointer"
+              className="px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-[#EB6658] hover:bg-slate-800 transition min-w-[46px] text-center cursor-pointer tabular-nums"
             >
               {Math.round(zoom * 100)}%
             </button>
@@ -709,7 +467,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
             </button>
             <button
               onClick={handleFitView}
-              title="Fit Graph to View (or Double-Click Canvas)"
+              title="Fit Graph to View"
               className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
             >
               <Maximize2 className="w-3.5 h-3.5" />
@@ -779,17 +537,15 @@ python -m graphify scan . --output repo_graph.json --visualize`;
                     const isHighlighted =
                       isHovered || source.id === selectedNodeId || target.id === selectedNodeId;
 
-                    // Dynamic start and end connection coordinates based on live node x, y
-                    const startX = source.x + 190;
-                    const startY = source.y + 36;
+                    const startX = source.x + 210;
+                    const startY = source.y + 42;
                     const endX = target.x;
-                    const endY = target.y + 36;
+                    const endY = target.y + 42;
                     const midX = (startX + endX) / 2;
                     const pathD = `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
 
                     return (
                       <g key={edgeKey} className="pointer-events-auto">
-                        {/* Invisible wide hit-area so user can hover/click edges */}
                         <path
                           d={pathD}
                           fill="none"
@@ -839,7 +595,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
                       position: 'absolute',
                       left: `${node.x}px`,
                       top: `${node.y}px`,
-                      width: '190px',
+                      width: '210px',
                       cursor: isBeingDragged ? 'grabbing' : 'grab'
                     }}
                     className={`p-3 rounded-xl border select-none ${
@@ -852,17 +608,14 @@ python -m graphify scan . --output repo_graph.json --visualize`;
                         : 'bg-slate-950/90 border-slate-800/90 hover:border-slate-600 hover:bg-slate-900/80 z-0'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: layerColor }}
-                        />
-                        <span className="text-[10px] font-mono text-slate-400 uppercase font-semibold truncate max-w-[110px]">
-                          {node.layerLabel}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-500">
+                    <div className="flex items-center justify-between mb-1">
+                      <span
+                        className="text-[10px] font-mono uppercase font-semibold truncate max-w-[125px]"
+                        style={{ color: layerColor }}
+                      >
+                        {node.layerLabel}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500 tabular-nums">
                         {node.loc} LOC
                       </span>
                     </div>
@@ -872,10 +625,14 @@ python -m graphify scan . --output repo_graph.json --visualize`;
                       <Move className="w-3 h-3 text-slate-500 shrink-0 ml-1" />
                     </div>
 
-                    <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500 font-mono border-t border-slate-800/60 pt-1">
-                      <span>In: {node.inbound.length}</span>
-                      <span>Out: {node.outbound.length}</span>
-                      <span className="text-[9px] text-slate-600">({node.x},{node.y})</span>
+                    {/* Aligned Agent & LangGraph Actor Row */}
+                    <div className="mt-1.5 pt-1 border-t border-slate-800/70 flex items-center justify-between gap-1 text-[10px]">
+                      <span className="text-slate-300 truncate font-medium">
+                        {node.assignedAgentName}
+                      </span>
+                      <span className="font-mono text-[9px] text-sky-400 shrink-0">
+                        {node.flowDecorator?.split('(')[0] || '@listen'}
+                      </span>
                     </div>
                   </div>
                 );
@@ -886,29 +643,18 @@ python -m graphify scan . --output repo_graph.json --visualize`;
           {/* Canvas Bottom Legend & Quick Actions */}
           <div
             onMouseDown={(e) => e.stopPropagation()}
-            className="p-3 border-t border-slate-800/80 bg-slate-950/90 flex items-center justify-between text-[11px] text-slate-400 z-20 backdrop-blur-sm flex-wrap gap-2"
+            className="p-3 border-t border-slate-800/80 bg-slate-950/90 flex items-center justify-between text-[11px] text-slate-400 z-20 flex-wrap gap-2"
           >
             <div className="flex items-center gap-4 flex-wrap">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#EB6658]"></span>
-                <span>Entry & Root</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#38BDF8]"></span>
-                <span>UI Components</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#34D399]"></span>
-                <span>Data & Knowledge</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]"></span>
-                <span>Types</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#A78BFA]"></span>
-                <span>Config & Server</span>
-              </span>
+              <span className="text-[#EB6658] font-medium">Entry & Root</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#38BDF8] font-medium">UI & Graph Views</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#34D399] font-medium">Unified Graph & Data</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#F59E0B] font-medium">TypeScript Contracts</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#A78BFA] font-medium">Server & Standalone</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -924,8 +670,8 @@ python -m graphify scan . --output repo_graph.json --visualize`;
               >
                 Fit View
               </button>
-              <span className="font-mono text-slate-500 text-[10px]">
-                {filteredNodes.length}/{nodes.length} Nodes • Pan: ({Math.round(pan.x)}, {Math.round(pan.y)})
+              <span className="font-mono text-slate-500 text-[10px] tabular-nums">
+                {filteredNodes.length}/{nodes.length} Modules
               </span>
             </div>
           </div>
@@ -937,31 +683,93 @@ python -m graphify scan . --output repo_graph.json --visualize`;
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Boxes className="w-4 h-4 text-[#EB6658]" />
-                <h3 className="text-sm font-bold text-white">Module Inspector</h3>
+                <h3 className="text-sm font-bold text-white">Module & Graph Alignment Inspector</h3>
               </div>
               <span
-                className="text-[10px] font-mono uppercase px-2 py-0.5 rounded font-bold"
-                style={{
-                  backgroundColor: `${getLayerColor(selectedNode.layer)}20`,
-                  color: getLayerColor(selectedNode.layer)
-                }}
+                className="text-[10px] font-mono uppercase font-bold"
+                style={{ color: getLayerColor(selectedNode.layer) }}
               >
                 {selectedNode.layerLabel}
               </span>
             </div>
 
             <div>
-              <span className="text-slate-400 block mb-1">File Path:</span>
+              <span className="text-slate-400 block mb-1">Repository File Path:</span>
               <code className="text-xs font-mono text-emerald-400 bg-slate-950 p-1.5 rounded block border border-slate-800 truncate">
                 {selectedNode.path}
               </code>
             </div>
 
             <div>
-              <span className="text-slate-400 block mb-1">Role & Responsibility:</span>
+              <span className="text-slate-400 block mb-1">Architectural Role:</span>
               <p className="text-slate-300 leading-relaxed bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/60">
                 {selectedNode.description}
               </p>
+            </div>
+
+            {/* Aligned CrewAI Agent, LangGraph Node & Flow DAG Step Card */}
+            <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5 text-[#EB6658]" />
+                  <span>Aligned Multi-Graph Ownership</span>
+                </span>
+                <span className="font-mono text-[10px] text-sky-400">
+                  {selectedNode.flowDecorator}
+                </span>
+              </div>
+
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-400">CrewAI Specialist:</span>
+                  <span className="font-semibold text-white truncate">
+                    {selectedNode.assignedAgentName} ({selectedNode.assignedAgentRole})
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-400">LangGraph Actor Node:</span>
+                  <code className="font-mono text-sky-300">{selectedNode.langGraphNodeId}</code>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-400">Task DAG Step:</span>
+                  <span className="text-amber-300 font-medium truncate max-w-[180px]">
+                    {selectedNode.alignedTaskName}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                {onOpenCrewStudio && (
+                  <button
+                    type="button"
+                    onClick={onOpenCrewStudio}
+                    className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-[10px] font-semibold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <Layers className="w-3 h-3 text-[#EB6658]" />
+                    <span>Task DAG</span>
+                  </button>
+                )}
+                {onOpenLangGraphNode && selectedNode.langGraphNodeId && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenLangGraphNode(selectedNode.langGraphNodeId!)}
+                    className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-sky-300 border border-slate-700 text-[10px] font-semibold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <Network className="w-3 h-3 text-sky-400" />
+                    <span>LangGraph</span>
+                  </button>
+                )}
+                {onOpenFlowStep && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenFlowStep(selectedNode.alignedTaskId)}
+                    className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-[10px] font-semibold transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <GitMerge className="w-3 h-3 text-amber-400" />
+                    <span>Flow Step</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Inbound & Outbound Connections */}
@@ -971,7 +779,7 @@ python -m graphify scan . --output repo_graph.json --visualize`;
                   Inbound Callers / Imported By ({selectedNode.inbound.length}):
                 </span>
                 {selectedNode.inbound.length === 0 ? (
-                  <span className="text-slate-500 italic">None (Root or Standalone)</span>
+                  <span className="text-slate-500 italic">None (Root or Standalone Entry)</span>
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {selectedNode.inbound.map((callerId) => (
@@ -1015,32 +823,15 @@ python -m graphify scan . --output repo_graph.json --visualize`;
               </div>
             </div>
 
-            {/* Exports */}
-            {selectedNode.exports.length > 0 && (
-              <div className="pt-1 border-t border-slate-800/80">
-                <span className="text-slate-400 block mb-1 font-semibold">Public Exports:</span>
-                <div className="flex flex-wrap gap-1">
-                  {selectedNode.exports.map((exp) => (
-                    <span
-                      key={exp}
-                      className="text-[10px] font-mono text-slate-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800"
-                    >
-                      {exp}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Google Jules Autonomous Agent Integration */}
             <div className="pt-2 border-t border-slate-800/80">
               <button
                 onClick={() => onTaskJules?.(selectedNode)}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-r from-blue-600/30 via-indigo-600/30 to-blue-600/30 hover:from-blue-600/40 hover:to-indigo-600/40 text-blue-300 hover:text-white border border-blue-500/40 transition text-xs font-bold shadow-md shadow-blue-500/10 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-200 hover:text-white border border-blue-500/40 transition text-xs font-bold cursor-pointer"
                 title="Launch Google Jules Cloud VM to test, refactor, or generate unit tests for this module"
               >
                 <Cpu className="w-4 h-4 text-blue-400" />
-                <span>Task Google Jules on this Module</span>
+                <span>Task Google Jules on {selectedNode.name}</span>
               </button>
             </div>
           </div>

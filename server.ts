@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import zlib from 'zlib';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from "@google/genai";
 
@@ -727,8 +729,11 @@ app.post('/api/github/push-file', async (req, res) => {
   }
 });
 
-// Helper to collect all workspace source files for full-app GitHub push (strictly excluding .env secrets)
-function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: string }>): Array<{ path: string; content: string }> {
+// Helper to collect all workspace source files for full-app GitHub push & standalone self-extracting .bat (strictly excluding .env secrets by default)
+function collectWorkspaceAppFiles(
+  extraFiles?: Array<{ path: string; content: string }>,
+  options?: { excludeBatFiles?: boolean }
+): Array<{ path: string; content: string }> {
   const result: Array<{ path: string; content: string }> = [];
   const seen = new Set<string>();
   const rootDir = process.cwd();
@@ -741,11 +746,10 @@ function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: st
     'vite.config.ts',
     'index.html',
     'metadata.json',
+    'firebase-applet-config.json',
     '.env.example',
     'server.ts',
-    'start.bat',
-    'run.bat',
-    'run.sh',
+    ...(options?.excludeBatFiles ? [] : ['standalone.bat', 'start.bat', 'run.bat', 'run.sh']),
     'README.md'
   ];
 
@@ -761,6 +765,17 @@ function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: st
     }
   }
 
+  // Also include public/favicon.svg if present
+  const faviconPath = path.join(rootDir, 'public', 'favicon.svg');
+  if (fs.existsSync(faviconPath)) {
+    try {
+      result.push({ path: 'public/favicon.svg', content: fs.readFileSync(faviconPath, 'utf-8') });
+      seen.add('public/favicon.svg');
+    } catch {
+      // ignore
+    }
+  }
+
   const walkDir = (dirRel: string) => {
     const absDir = path.join(rootDir, dirRel);
     if (!fs.existsSync(absDir)) return;
@@ -771,7 +786,7 @@ function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: st
       const st = fs.statSync(absPath);
       if (st.isDirectory()) {
         walkDir(relPath);
-      } else if (/\.(ts|tsx|js|jsx|css|json|md|html)$/i.test(entry) && st.size < 600000) {
+      } else if (/\.(ts|tsx|js|jsx|css|json|md|html|svg)$/i.test(entry) && st.size < 600000) {
         if (!seen.has(relPath)) {
           try {
             result.push({ path: relPath, content: fs.readFileSync(absPath, 'utf-8') });
@@ -806,19 +821,263 @@ function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: st
   return result;
 }
 
-// Download Standalone Windows Launcher (start.bat)
-app.get('/api/standalone/bat', (req, res) => {
-  const batPath = path.join(process.cwd(), 'start.bat');
-  if (fs.existsSync(batPath)) {
-    res.setHeader('Content-Type', 'application/x-bat; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="start.bat"');
-    return res.send(fs.readFileSync(batPath, 'utf-8'));
+/**
+ * Generates a self-extracting Windows `standalone.bat` that embeds the ENTIRE frontend (`src/**`, `index.html`, `vite.config.ts`)
+ * and backend (`server.ts`, `package.json`, `tsconfig*.json`, `.env.example`) as a GZip-compressed Base64 archive.
+ * When run in ANY folder on Windows, it unpacks/updates all frontend + backend files, installs dependencies if needed,
+ * and launches the identical full-stack application on http://localhost:3000 in a standalone desktop window.
+ */
+function buildSelfExtractingStandaloneBat(includeCurrentEnv = false): string {
+  const appFiles = collectWorkspaceAppFiles(undefined, { excludeBatFiles: true });
+
+  if (includeCurrentEnv) {
+    const envPath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      try {
+        appFiles.push({ path: '.env.bundled', content: fs.readFileSync(envPath, 'utf-8') });
+      } catch {
+        // ignore
+      }
+    }
   }
-  return res.status(404).json({ error: 'start.bat not found' });
+
+  const jsonPayload = JSON.stringify(appFiles);
+  const compressed = zlib.gzipSync(Buffer.from(jsonPayload, 'utf-8'), { level: 9 });
+  const base64 = compressed.toString('base64');
+
+  // Split Base64 into 120-character lines prefixed with `::B64:`
+  const b64Lines: string[] = [];
+  for (let i = 0; i < base64.length; i += 120) {
+    b64Lines.push(`::B64:${base64.slice(i, i + 120)}`);
+  }
+
+  // Build PowerShell unpacker script and encode as UTF-16LE Base64 for `-EncodedCommand`
+  // This avoids all cmd.exe quoting, pipe `|`, `&`, and multi-line `^` escaping bugs on Windows.
+  const psUnpackScript = [
+    "$ErrorActionPreference = 'Stop'",
+    "$bat = $env:SELF_BAT",
+    "if (-not $bat -or -not (Test-Path -LiteralPath $bat)) {",
+    "  $bat = Join-Path (Get-Location).Path 'standalone.bat'",
+    "}",
+    "$lines = [System.IO.File]::ReadAllLines($bat)",
+    "$sb = New-Object System.Text.StringBuilder",
+    "foreach ($line in $lines) {",
+    "  if ($line.StartsWith('::B64:')) {",
+    "    [void]$sb.Append($line.Substring(6).Trim())",
+    "  }",
+    "}",
+    "$b64 = $sb.ToString()",
+    "if ($b64.Length -gt 0) {",
+    "  $bytes = [Convert]::FromBase64String($b64)",
+    "  $ms = New-Object System.IO.MemoryStream(,$bytes)",
+    "  $gz = New-Object System.IO.Compression.GzipStream($ms, [System.IO.Compression.CompressionMode]::Decompress)",
+    "  $sr = New-Object System.IO.StreamReader($gz, [System.Text.Encoding]::UTF8)",
+    "  $json = $sr.ReadToEnd()",
+    "  $sr.Close(); $gz.Close(); $ms.Close()",
+    "  $files = ConvertFrom-Json $json",
+    "  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)",
+    "  $cwd = (Get-Location).Path",
+    "  $count = 0",
+    "  foreach ($f in $files) {",
+    "    $rel = ([string]$f.path) -replace '/', [System.IO.Path]::DirectorySeparatorChar",
+    "    if ($rel -eq '.env.bundled') {",
+    "      $envDest = Join-Path $cwd '.env'",
+    "      if (-not (Test-Path -LiteralPath $envDest)) {",
+    "        [System.IO.File]::WriteAllText($envDest, [string]$f.content, $utf8NoBom)",
+    "      }",
+    "      continue",
+    "    }",
+    "    $dest = Join-Path $cwd $rel",
+    "    $dir = Split-Path -Parent $dest",
+    "    if ($dir -and -not (Test-Path -LiteralPath $dir)) {",
+    "      New-Item -ItemType Directory -Path $dir -Force | Out-Null",
+    "    }",
+    "    [System.IO.File]::WriteAllText($dest, [string]$f.content, $utf8NoBom)",
+    "    $count++",
+    "  }",
+    "  Write-Host ('[OK] Unpacked and synced ' + $count + ' full-stack application files (Frontend src/** + Backend server.ts + configs).') -ForegroundColor Green",
+    "} else {",
+    "  Write-Host '[WARN] No embedded archive payload found in batch file; using existing folder files.' -ForegroundColor Yellow",
+    "}"
+  ].join('\n');
+
+  const encodedPsCommand = Buffer.from(psUnpackScript, 'utf16le').toString('base64');
+
+  const batLines = [
+    '@echo off',
+    'setlocal enabledelayedexpansion',
+    'chcp 65001 >nul 2>nul',
+    ':: Always anchor working directory to the folder containing this standalone.bat file',
+    'cd /d "%~dp0"',
+    'set "SELF_BAT=%~f0"',
+    '',
+    'title CrewAI Studio - Full-Stack Standalone Application (Frontend + Backend)',
+    'color 0B',
+    '',
+    'echo ============================================================================',
+    'echo    CrewAI Studio ^& Multi-Agent Workbench - Full-Stack Standalone (.BAT)',
+    'echo    Identical Frontend (React 19 + Tailwind + DAG) ^& Backend (Express + APIs)',
+    'echo ============================================================================',
+    'echo.',
+    'echo [INFO] Standalone Directory: %CD%',
+    '',
+    ':: 1. Self-Extract / Sync Embedded Full-Stack Codebase (Frontend src/** + Backend server.ts)',
+    `echo [1/6] Synchronizing embedded Frontend ^& Backend files (${appFiles.length} source files)...`,
+    `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedPsCommand}`,
+    'if %errorlevel% neq 0 (',
+    '    echo [WARN] PowerShell unpack reported a non-zero status; continuing if files exist on disk...',
+    ')',
+    '',
+    'if not exist "server.ts" (',
+    '    color 0C',
+    '    echo [ERROR] server.ts was not unpacked. Ensure PowerShell is enabled on your Windows system.',
+    '    pause',
+    '    exit /b 1',
+    ')',
+    '',
+    ':: 2. Verify Node.js & npm installation',
+    'where node >nul 2>nul',
+    'if %errorlevel% neq 0 (',
+    '    color 0C',
+    '    echo [ERROR] Node.js is not installed or not in your Windows PATH.',
+    '    echo         Please install Node.js LTS ^(v20 or v22+^) from: https://nodejs.org/',
+    '    echo.',
+    '    pause',
+    '    exit /b 1',
+    ')',
+    '',
+    'for /f "tokens=*" %%v in (\'node -v\') do set "NODE_VER=%%v"',
+    'for /f "tokens=*" %%v in (\'npm -v\') do set "NPM_VER=%%v"',
+    'echo [2/6] Runtime Verified: Node.js !NODE_VER! ^| npm v!NPM_VER!',
+    '',
+    ':: 3. Configure CPU & Memory Guardrails (Prevent PC Freeze / RAM Bloat)',
+    'set "PORT=3000"',
+    'set "STANDALONE_LAUNCH=1"',
+    'set "NODE_OPTIONS=--max-old-space-size=2048"',
+    'echo [3/6] Resource Guard Active: NODE_OPTIONS=%NODE_OPTIONS% ^| PORT=%PORT%',
+    '',
+    ':: 4. Ensure .env file exists (Preserves existing .env or creates from .env.example)',
+    'if not exist ".env" (',
+    '    if exist ".env.example" (',
+    '        copy /y ".env.example" ".env" >nul',
+    '        echo [4/6] Created default .env from .env.example.',
+    '    )',
+    ') else (',
+    '    echo [4/6] Active .env configuration loaded.',
+    ')',
+    '',
+    ':: 5. Free Port 3000 if a stale server instance is still holding it & verify node_modules',
+    'set "STALE_PID="',
+    'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":3000 " ^| findstr "LISTENING"\') do (',
+    '    set "STALE_PID=%%p"',
+    ')',
+    'if defined STALE_PID (',
+    '    if not "!STALE_PID!"=="0" (',
+    '        echo [INFO] Stopping previous server on Port 3000 ^(PID !STALE_PID!^)...',
+    '        taskkill /F /PID !STALE_PID! >nul 2>nul',
+    '        timeout /t 1 /nobreak >nul',
+    '    )',
+    ')',
+    '',
+    'if not exist "node_modules\\.bin\\tsx.cmd" (',
+    '    echo [5/6] Installing full-stack dependencies ^(npm install --legacy-peer-deps^)...',
+    '    call npm install --legacy-peer-deps --no-audit --no-fund',
+    '    if !errorlevel! neq 0 (',
+    '        color 0C',
+    '        echo [ERROR] npm install failed. Check your internet connection and try again.',
+    '        pause',
+    '        exit /b 1',
+    '    )',
+    ') else (',
+    '    echo [5/6] Dependencies verified ^(node_modules ready^).',
+    ')',
+    '',
+    ':: 6. Start Full-Stack Express + Vite Server (server.ts automatically opens the desktop window once Port 3000 is listening)',
+    'set "APP_URL=http://localhost:%PORT%"',
+    'echo [6/6] Starting Full-Stack Server ^& Opening Standalone Window on %APP_URL%...',
+    'echo.',
+    'echo ============================================================================',
+    'echo [STANDALONE RUNNING] %APP_URL%',
+    'echo  - Frontend: Crew Studio, 8-Agent Full-Stack Org, Task Dependency Graph,',
+    'echo              Real-Time Progress Bar, LangGraph, Flows, Traces ^& GitHub Hub',
+    'echo  - Backend : Express API Server (server.ts), Gemini Quota Governor, Jules VM',
+    'echo  - Press Ctrl+C in this window anytime to stop the standalone server.',
+    'echo ============================================================================',
+    'echo.',
+    '',
+    ':server_loop',
+    'if /i "%~1"=="--prod" (',
+    '    if not exist "dist\\index.html" (',
+    '        echo [INFO] Building production bundle...',
+    '        call npm run build',
+    '    )',
+    '    set "NODE_ENV=production"',
+    ')',
+    'if exist "node_modules\\.bin\\tsx.cmd" (',
+    '    call "node_modules\\.bin\\tsx.cmd" server.ts',
+    ') else (',
+    '    call npx tsx server.ts',
+    ')',
+    '',
+    'echo.',
+    'echo [WARN] Standalone server process exited.',
+    'set /p RESTART_CHOICE="Restart CrewAI Studio Standalone Server? (Y/N): "',
+    'if /i "!RESTART_CHOICE!"=="Y" goto :server_loop',
+    'pause',
+    'exit /b 0',
+    '',
+    ':: ============================================================================',
+    ':: EMBEDDED FULL-STACK APPLICATION ARCHIVE (GZIP + BASE64)',
+    ':: Contains server.ts, package.json, vite.config.ts, index.html, and src/**',
+    ':: ============================================================================',
+    ...b64Lines,
+    ''
+  ];
+
+  return batLines.join('\r\n');
+}
+
+// Sync standalone.bat and start.bat on disk so workspace copies also contain the latest self-extracting bundle
+function syncStandaloneBatFilesOnDisk() {
+  // Never overwrite standalone.bat while cmd.exe is actively executing it on Windows
+  if (process.platform === 'win32' || process.env.STANDALONE_LAUNCH === '1') {
+    return;
+  }
+  try {
+    const content = buildSelfExtractingStandaloneBat(false);
+    fs.writeFileSync(path.join(process.cwd(), 'standalone.bat'), content, 'utf-8');
+    fs.writeFileSync(path.join(process.cwd(), 'start.bat'), content, 'utf-8');
+    const runBatContent = [
+      '@echo off',
+      'setlocal',
+      'cd /d "%~dp0"',
+      'call "%~dp0standalone.bat" %*',
+      ''
+    ].join('\r\n');
+    fs.writeFileSync(path.join(process.cwd(), 'run.bat'), runBatContent, 'utf-8');
+  } catch (err) {
+    console.warn('Could not sync standalone.bat on disk:', err);
+  }
+}
+
+// Download Self-Extracting Standalone Windows Application (standalone.bat)
+app.get('/api/standalone/bat', (req, res) => {
+  try {
+    const includeEnv = req.query.includeEnv === '1' || req.query.includeEnv === 'true';
+    const batContent = buildSelfExtractingStandaloneBat(includeEnv);
+    // Also refresh disk copies when running in container
+    syncStandaloneBatFilesOnDisk();
+    res.setHeader('Content-Type', 'application/x-bat; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="standalone.bat"');
+    return res.send(batContent);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to generate standalone.bat' });
+  }
 });
 
 // Atomic Full-App Push to GitHub via PAT (Git Trees & Commits API)
 app.post('/api/github/push-app', async (req, res) => {
+  syncStandaloneBatFilesOnDisk();
   loadEnvWithOverride();
   const {
     token: clientToken,
@@ -3216,6 +3475,7 @@ app.post('/api/crew/execution-status', (req, res) => {
 
 // Vite Middleware in Dev or Static in Production
 async function startServer() {
+  syncStandaloneBatFilesOnDisk();
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
     app.use((req, res) => {
@@ -3232,6 +3492,13 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${PORT}`);
+    if (process.platform === 'win32' && process.env.STANDALONE_LAUNCH === '1') {
+      const appUrl = `http://localhost:${PORT}`;
+      console.log(`[STANDALONE] Launching desktop window at ${appUrl} ...`);
+      exec(
+        `start msedge --app=${appUrl} --window-size=1480,940 2>nul || start chrome --app=${appUrl} --window-size=1480,940 2>nul || start "" "${appUrl}"`
+      );
+    }
   });
 }
 

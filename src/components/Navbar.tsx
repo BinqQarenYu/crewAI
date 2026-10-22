@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DocTab, LanguageCode, VersionCode } from '../types';
-import { 
-  BookOpen, 
-  Layers, 
-  GitMerge, 
-  Wrench, 
-  Activity, 
-  Search, 
-  Terminal, 
+import {
+  BookOpen,
+  Layers,
+  GitMerge,
+  Wrench,
+  Activity,
+  Search,
+  Terminal,
   ExternalLink,
   ChevronDown,
   Globe,
@@ -18,7 +18,8 @@ import {
   CheckCircle2,
   QrCode,
   UploadCloud,
-  RefreshCw
+  RefreshCw,
+  Sliders
 } from 'lucide-react';
 import { NotificationCenter } from './NotificationCenter';
 import { globalTaskThrottler, useTaskThrottlerMetrics } from '../utils/taskThrottler';
@@ -54,7 +55,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   language,
   onLanguageChange,
   version,
-  onVersionChange,
+  onVersionChange
 }) => {
   const [patUserLogin, setPatUserLogin] = useState<string | null>(() =>
     localStorage.getItem('crewai_github_user_login')
@@ -62,13 +63,26 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [allCardsMinimized, setAllCardsMinimized] = useState(false);
   const [ecoMode, setEcoMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('crewai_eco_cpu_mode');
-    return saved !== 'false'; // Default ON to protect PC CPU & memory
+    return saved !== 'false';
   });
-  const [showResourcePopover, setShowResourcePopover] = useState(false);
+  const [showRuntimeDrawer, setShowRuntimeDrawer] = useState(false);
   const [storageKb, setStorageKb] = useState<number>(0);
   const [heapMb, setHeapMb] = useState<number | null>(null);
   const [trimNotice, setTrimNotice] = useState<string | null>(null);
-  const throttlerMetrics = useTaskThrottlerMetrics(showResourcePopover);
+  const throttlerMetrics = useTaskThrottlerMetrics(showRuntimeDrawer);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
+        setShowRuntimeDrawer(false);
+      }
+    };
+    if (showRuntimeDrawer) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showRuntimeDrawer]);
 
   const measureResources = () => {
     try {
@@ -99,7 +113,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const handleTrimStorageAndRam = () => {
     try {
-      // Trim heavy execution history to last 3 compact runs while preserving .env, PAT, and active crew
       const rawHistory = localStorage.getItem('crewai_studio_execution_history');
       if (rawHistory) {
         const parsed = JSON.parse(rawHistory);
@@ -181,11 +194,10 @@ export const Navbar: React.FC<NavbarProps> = ({
     setIsPushingApp(true);
     setPushBanner({
       type: 'info',
-      text: `Pushing full CrewAI Studio app workspace to GitHub (${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'})...`
+      text: `Pushing full CrewAI Studio workspace to GitHub (${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'})...`
     });
 
     try {
-      // Collect active crew from localStorage autosave to include in the commit
       const extraFiles: Array<{ path: string; content: string }> = [];
       try {
         const autosaved = localStorage.getItem('crewai_studio_workflow_autosave');
@@ -217,7 +229,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           token: token || undefined,
           repo: selectedRepo || 'bingkltech/crewAI',
           branch: selectedBranch || 'main',
-          message: 'feat(app): push full CrewAI Studio app, Full-Stack 8-Agent preset & global task throttler',
+          message: 'feat(app): align Crew Studio DAG, LangGraph StateGraph, Flow DAG & Graphify architecture',
           extraFiles
         })
       });
@@ -239,7 +251,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       setPushBanner({
         type: 'success',
-        text: `Pushed ${data.filesPushed || 47} app files to ${data.repo}@${data.branch} (Commit ${data.shortSha})`,
+        text: `Pushed ${data.filesPushed || 56} app files to ${data.repo}@${data.branch} (Commit ${data.shortSha})`,
         commitUrl: data.commitUrl,
         repoUrl: data.repoUrl
       });
@@ -288,7 +300,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               setPatUserLogin(connectData.user.login);
               localStorage.setItem('crewai_github_user_login', connectData.user.login);
             }
-            // Auto-push full app workspace once when PAT is connected
             if (!localStorage.getItem('crewai_auto_pushed_full_app_v3')) {
               handlePushEntireApp(token, true);
             }
@@ -331,173 +342,224 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tabs = [
-    { id: 'docs' as DocTab, label: 'Documentation', icon: BookOpen },
-    { id: 'studio' as DocTab, label: 'Crew Studio', icon: Layers, badge: 'Interactive' },
-    { id: 'graphs' as DocTab, label: 'Graphs', icon: Network, badge: 'LangGraph' },
-    { id: 'flows' as DocTab, label: 'Flow & Graphify', icon: GitMerge, badge: 'Repo Graph' },
+    { id: 'studio' as DocTab, label: 'Crew Studio', icon: Layers },
+    { id: 'graphs' as DocTab, label: 'LangGraph', icon: Network },
+    { id: 'flows' as DocTab, label: 'Flow & Graphify', icon: GitMerge },
     {
       id: 'github' as DocTab,
-      label: 'GitHub Hub',
-      icon: GitBranch,
-      badge: patUserLogin ? `@${patUserLogin}` : 'PAT Connect'
+      label: patUserLogin ? `GitHub (@${patUserLogin})` : 'GitHub Hub',
+      icon: GitBranch
     },
-    { id: 'tools' as DocTab, label: 'Tools Catalog', icon: Wrench, count: '18+' },
+    { id: 'tools' as DocTab, label: 'Tools', icon: Wrench },
     { id: 'traces' as DocTab, label: 'Observability', icon: Activity },
+    { id: 'docs' as DocTab, label: 'Docs', icon: BookOpen }
   ];
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-[#0B0F19]/95 backdrop-blur-md">
-      <div className="px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-4">
-          {/* Logo & Brand */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => onTabChange('docs')}
-              className="flex items-center gap-2.5 text-left group transition"
-            >
-              <img
-                src="/images/crew_only_logo.png"
-                alt="CrewAI Logo"
-                className="h-7 w-auto object-contain brightness-110"
-                onError={(e) => {
-                  // Fallback if image fails to render
-                  (e.currentTarget as HTMLElement).style.display = 'none';
-                }}
-              />
-              <span className="text-xl font-bold tracking-tight text-white group-hover:text-[#EB6658] transition flex items-center gap-1.5">
-                CrewAI
-                <span className="text-xs px-2 py-0.5 rounded-full bg-[#EB6658]/15 text-[#EB6658] font-semibold border border-[#EB6658]/30">
-                  {version}
-                </span>
-              </span>
-            </button>
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-14 gap-6">
+          {/* Zone 1: Brand Wordmark */}
+          <button
+            type="button"
+            onClick={() => onTabChange('studio')}
+            className="flex items-center gap-2.5 text-left group transition shrink-0 whitespace-nowrap cursor-pointer"
+          >
+            <img
+              src="/images/crew_only_logo.png"
+              alt="CrewAI Logo"
+              referrerPolicy="no-referrer"
+              className="h-6 w-auto object-contain brightness-110"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = 'none';
+              }}
+            />
+            <span className="text-lg font-extrabold tracking-tight text-white group-hover:text-[#EB6658] transition">
+              CrewAI Studio
+            </span>
+          </button>
 
-            {/* Version dropdown */}
-            <div className="relative hidden md:block">
-              <select
-                aria-label="Select CrewAI version"
-                value={version}
-                onChange={(e) => onVersionChange(e.target.value as VersionCode)}
-                className="bg-slate-900 text-xs text-slate-300 font-medium px-2.5 py-1 rounded-md border border-slate-800 hover:border-slate-700 cursor-pointer outline-none focus:border-[#EB6658]"
-              >
-                <option value="Edge">Edge (Latest)</option>
-                <option value="v1.10.0">v1.10.0</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Navigation Tabs */}
-          <nav className="hidden lg:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800/60">
+          {/* Zone 2: Clean Single-Line Navigation Links */}
+          <nav className="hidden lg:flex items-center gap-1 bg-slate-900/70 p-1 rounded-xl border border-slate-800/80">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = currentTab === tab.id;
               return (
                 <button
                   key={tab.id}
+                  type="button"
                   onClick={() => onTabChange(tab.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer ${
                     isActive
                       ? 'bg-[#EB6658] text-white shadow-sm'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
                   <span>{tab.label}</span>
-                  {tab.badge && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-[#EB6658]/20 text-[#EB6658]'
-                    }`}>
-                      {tab.badge}
-                    </span>
-                  )}
-                  {tab.count && (
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {tab.count}
-                    </span>
-                  )}
                 </button>
               );
             })}
           </nav>
 
-          {/* Right Action Section */}
-          <div className="flex items-center gap-2">
-            {/* Global Card Single Stateful (-) / (+) Toggle */}
+          {/* Zone 3: Consolidated Actions (Search + Runtime Command Menu + Notifications + Primary Push CTA) */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Search Docs & Tools */}
             <button
               type="button"
-              onClick={() => {
-                const next = !allCardsMinimized;
-                setAllCardsMinimized(next);
-                window.dispatchEvent(
-                  new CustomEvent('crewai:toggle-all-cards', { detail: { minimized: next } })
-                );
-              }}
-              className={`px-2 h-6 rounded-lg text-xs font-mono font-extrabold transition flex items-center justify-center cursor-pointer leading-none shadow-sm ${
-                allCardsMinimized
-                  ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
-                  : 'bg-slate-950/90 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700/90 hover:border-amber-500/40'
-              }`}
-              title={allCardsMinimized ? 'Expand All Cards (+)' : 'Minimize All Cards (-)'}
+              onClick={onOpenSearch}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs transition cursor-pointer whitespace-nowrap"
+              title="Search documentation, agents & tools (⌘K)"
             >
-              {allCardsMinimized ? '(+)' : '(-)'}
+              <Search className="w-3.5 h-3.5 text-slate-400" />
+              <span className="hidden xl:inline">Search</span>
+              <kbd className="hidden sm:inline-block font-mono text-[10px] px-1.5 py-0.2 bg-slate-800 text-slate-400 rounded border border-slate-700">
+                ⌘K
+              </kbd>
             </button>
 
-            {/* PC CPU / Memory / Storage Guard */}
-            <div className="relative">
+            {/* Consolidated Runtime, Services & CPU Guard Drawer */}
+            <div className="relative" ref={drawerRef}>
               <button
                 type="button"
                 onClick={() => {
-                  if (!showResourcePopover) measureResources();
-                  setShowResourcePopover((p) => !p);
+                  if (!showRuntimeDrawer) measureResources();
+                  setShowRuntimeDrawer((p) => !p);
                 }}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                  ecoMode
-                    ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer whitespace-nowrap ${
+                  showRuntimeDrawer
+                    ? 'bg-slate-800 text-white border-slate-600'
+                    : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-800'
                 }`}
-                title="CPU, Memory & Storage Resource Guard (Prevents browser freezes & high CPU)"
+                title="AI Runtime Services, CPU Throttler, Jules VM, Ollama Pool & Workspace Settings"
               >
-                <Cpu className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">{ecoMode ? 'Eco CPU' : 'Full Polling'}</span>
+                <Sliders className="w-3.5 h-3.5 text-[#EB6658]" />
+                <span>Runtime & Services</span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 
-              {showResourcePopover && (
-                <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-4 z-50 space-y-3 text-xs">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <span className="font-bold text-white flex items-center gap-1.5">
-                      <Cpu className="w-3.5 h-3.5 text-emerald-400" />
-                      PC Resource & Anti-Freeze Guard
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowResourcePopover(false)}
-                      className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:text-white font-mono text-[10px]"
-                    >
-                      (-)
-                    </button>
+              {showRuntimeDrawer && (
+                <div className="absolute right-0 mt-2 w-96 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-4 z-50 space-y-4 text-xs">
+                  {/* Section 1: AI Runtime & DevOps Services */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="font-bold text-white">AI Runtime & Agent Services</span>
+                      <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                        {version} · {language.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {onOpenJules && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowRuntimeDrawer(false);
+                            onOpenJules();
+                          }}
+                          className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
+                        >
+                          <Cpu className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">Google Jules VM</div>
+                            <div className="text-[10px] text-slate-400">Cloud sandbox & PRs</div>
+                          </div>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowRuntimeDrawer(false);
+                          onOpenOllamaPool();
+                        }}
+                        className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
+                      >
+                        <Activity className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-white">Ollama Free Pool</div>
+                          <div className="text-[10px] text-slate-400">Multi-node failover</div>
+                        </div>
+                      </button>
+
+                      {onOpenDiagnostics && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowRuntimeDrawer(false);
+                            onOpenDiagnostics();
+                          }}
+                          className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">API Diagnostics</div>
+                            <div className="text-[10px] text-slate-400">Live latency probes</div>
+                          </div>
+                        </button>
+                      )}
+
+                      {onOpenRemoteScan && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowRuntimeDrawer(false);
+                            onOpenRemoteScan();
+                          }}
+                          className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
+                        >
+                          <QrCode className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">Remote QR Scan</div>
+                            <div className="text-[10px] text-slate-400">Mobile control deck</div>
+                          </div>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowRuntimeDrawer(false);
+                          onOpenAgentSetup();
+                        }}
+                        className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
+                      >
+                        <Terminal className="w-4 h-4 text-[#EB6658] shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-white">Agent Skills Prompt</div>
+                          <div className="text-[10px] text-slate-400">Cursor & Claude Code</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !allCardsMinimized;
+                          setAllCardsMinimized(next);
+                          window.dispatchEvent(
+                            new CustomEvent('crewai:toggle-all-cards', { detail: { minimized: next } })
+                          );
+                        }}
+                        className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
+                      >
+                        <Layers className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-white">
+                            {allCardsMinimized ? 'Expand All Cards' : 'Minimize All Cards'}
+                          </div>
+                          <div className="text-[10px] text-slate-400">Workspace density</div>
+                        </div>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
-                      <div className="text-[10px] text-slate-400">Browser Storage</div>
-                      <div className="text-sm font-mono font-bold text-emerald-400">
-                        {storageKb} KB <span className="text-[10px] text-slate-500">/ 5120 KB</span>
-                      </div>
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
-                      <div className="text-[10px] text-slate-400">JS Heap RAM</div>
-                      <div className="text-sm font-mono font-bold text-sky-400">
-                        {heapMb !== null ? `${heapMb} MB` : 'Bounded'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+                  {/* Section 2: Global Task Throttler & CPU Guard */}
+                  <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="font-semibold text-slate-200">Zero-Idle CPU Mode</div>
+                        <div className="font-bold text-white">Global Task & CPU Throttler</div>
                         <div className="text-[10px] text-slate-400">
-                          Pauses background timers & DOM polling when idle
+                          Storage: {storageKb} KB · Heap: {heapMb !== null ? `${heapMb} MB` : 'Bounded'}
                         </div>
                       </div>
                       <button
@@ -509,42 +571,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                             : 'bg-slate-800 text-slate-400 border border-slate-700'
                         }`}
                       >
-                        {ecoMode ? 'ON' : 'OFF'}
+                        Eco CPU: {ecoMode ? 'ON' : 'OFF'}
                       </button>
                     </div>
-                  </div>
 
-                  {/* Global Task & API Polling Throttler Telemetry */}
-                  <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-200">Global Task Throttler</span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${
-                          throttlerMetrics.heavyOpsCount > 0 || throttlerMetrics.isCongested
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                        }`}
-                      >
-                        {throttlerMetrics.heavyOpsCount > 0
-                          ? `Heavy Op Lock (${throttlerMetrics.pollingMultiplier}x Backoff)`
-                          : `Active (${throttlerMetrics.pollingMultiplier}x Pace)`}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1.5 text-center">
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="grid grid-cols-3 gap-1.5 text-center tabular-nums">
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
                         <div className="text-[9px] text-slate-400">Queue / Active</div>
                         <div className="font-mono font-bold text-slate-200 text-[11px]">
                           {throttlerMetrics.queuedTasks} / {throttlerMetrics.activeTasks}
                         </div>
                       </div>
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
                         <div className="text-[9px] text-slate-400">Deduplicated</div>
                         <div className="font-mono font-bold text-emerald-400 text-[11px]">
                           {throttlerMetrics.cachedPollResponses + throttlerMetrics.coalescedRequests}
                         </div>
                       </div>
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
                         <div className="text-[9px] text-slate-400">Frame Lag</div>
                         <div className="font-mono font-bold text-sky-400 text-[11px]">
                           {throttlerMetrics.lastFrameLagMs}ms
@@ -552,8 +596,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-[10px] text-slate-400">Max Concurrent Tasks:</span>
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="text-[10px] text-slate-400">Max Concurrency:</span>
                       <div className="flex items-center gap-1">
                         {[1, 2, 4, 6].map((limit) => (
                           <button
@@ -571,190 +615,99 @@ export const Navbar: React.FC<NavbarProps> = ({
                         ))}
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleTrimStorageAndRam}
+                      className="w-full py-1.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-semibold transition cursor-pointer text-center text-[11px]"
+                    >
+                      Trim Logs & Free Memory (Keep .env & PAT)
+                    </button>
+
+                    {trimNotice && (
+                      <div className="text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-2.5 py-1.5">
+                        {trimNotice}
+                      </div>
+                    )}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleTrimStorageAndRam}
-                    className="w-full py-2 px-3 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 font-semibold transition cursor-pointer text-center"
-                  >
-                    Trim Old Logs & Free Memory (Keep .env & PAT)
-                  </button>
-
-                  {trimNotice && (
-                    <div className="text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-2.5 py-1.5">
-                      {trimNotice}
+                  {/* Section 3: Version & Language Preferences */}
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">CrewAI Version</label>
+                      <select
+                        aria-label="Select CrewAI version"
+                        value={version}
+                        onChange={(e) => onVersionChange(e.target.value as VersionCode)}
+                        className="w-full bg-slate-950 text-xs text-slate-200 font-medium px-2.5 py-1.5 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658]"
+                      >
+                        <option value="Edge">Edge (Latest)</option>
+                        <option value="v1.10.0">v1.10.0</option>
+                      </select>
                     </div>
-                  )}
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1 flex items-center gap-1">
+                        <Globe className="w-3 h-3" /> Language
+                      </label>
+                      <select
+                        aria-label="Select interface language"
+                        value={language}
+                        onChange={(e) => onLanguageChange(e.target.value as LanguageCode)}
+                        className="w-full bg-slate-950 text-xs text-slate-200 font-medium px-2.5 py-1.5 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658]"
+                      >
+                        <option value="en">English (EN)</option>
+                        <option value="ar">العربية (AR)</option>
+                        <option value="ko">한국어 (KO)</option>
+                        <option value="pt-BR">Português (PT)</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Search Button */}
-            <button
-              onClick={onOpenSearch}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs transition group"
-            >
-              <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#EB6658]" />
-              <span className="hidden sm:inline">Search docs...</span>
-              <kbd className="hidden sm:inline-block font-mono text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded border border-slate-700">
-                ⌘K
-              </kbd>
-            </button>
-
-            {/* Ollama Cloud Free Pool Button */}
-            <button
-              onClick={onOpenOllamaPool}
-              title="Continuous Free Credit Flow & Ollama Multi-Node Failover"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="hidden sm:inline">Ollama Free Pool</span>
-            </button>
-
-            {/* Google Jules DevOps Agent Button */}
-            {onOpenJules && (
-              <button
-                onClick={onOpenJules}
-                title="Google Jules Autonomous DevOps & Coding Agent in Cloud VM Sandbox"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 text-xs font-semibold transition cursor-pointer"
-              >
-                <Cpu className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden sm:inline">Google Jules</span>
-              </button>
-            )}
-
-            {/* Google Antigravity Remote via Scan Button */}
-            {onOpenRemoteScan && (
-              <button
-                onClick={onOpenRemoteScan}
-                title="Google Antigravity Remote via Scan — Pair phone via QR code or optical scanner to control workspace remotely"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-xs font-semibold transition cursor-pointer"
-              >
-                <QrCode className="w-3.5 h-3.5 text-purple-400" />
-                <span className="hidden sm:inline">Remote Scan</span>
-              </button>
-            )}
-
-            {/* Jules PR Notification Center & Real-Time Toast Alert Manager */}
+            {/* Notification Center */}
             <NotificationCenter
               selectedRepo={selectedRepo}
               selectedBranch={selectedBranch}
               onNavigateToGitHub={() => onTabChange('github')}
             />
 
-            {/* GitHub PAT Status & Quick-Connect Button */}
-            <button
-              onClick={() => onTabChange('github')}
-              title={
-                patUserLogin
-                  ? `GitHub PAT Connected as @${patUserLogin} — Click to manage PAT & repo sync`
-                  : 'Connect to GitHub using a Personal Access Token (PAT)'
-              }
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                patUserLogin
-                  ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-[#EB6658]/15 hover:bg-[#EB6658]/25 text-[#EB6658] border border-[#EB6658]/40'
-              }`}
-            >
-              {patUserLogin ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden sm:inline">PAT: @{patUserLogin}</span>
-                </>
-              ) : (
-                <>
-                  <Key className="w-3.5 h-3.5 text-[#EB6658]" />
-                  <span className="hidden sm:inline">GitHub PAT</span>
-                </>
-              )}
-            </button>
-
-            {/* One-Click Push Entire App to GitHub Button */}
+            {/* Primary CTA: One-Click Push App to GitHub */}
             <button
               type="button"
               disabled={isPushingApp}
               onClick={() => handlePushEntireApp()}
-              title={`Push entire CrewAI Studio application workspace (all 47+ source files) to ${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'} via PAT`}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#EB6658] to-[#C94C3C] hover:brightness-110 disabled:opacity-60 text-white text-xs font-bold shadow-sm shadow-[#EB6658]/20 transition cursor-pointer"
+              title={`Push entire CrewAI Studio application workspace to ${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'}`}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#EB6658] hover:bg-[#d95547] disabled:opacity-60 text-white text-xs font-bold shadow-sm transition cursor-pointer whitespace-nowrap"
             >
               {isPushingApp ? (
                 <>
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span className="hidden sm:inline">Pushing App...</span>
+                  <span>Pushing...</span>
                 </>
               ) : (
                 <>
                   <UploadCloud className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Push App</span>
+                  <span>Push App</span>
                 </>
               )}
             </button>
-
-            {/* API Diagnostics Live Probes Button */}
-            {onOpenDiagnostics && (
-              <button
-                onClick={onOpenDiagnostics}
-                title="Test all APIs, check live latency & model availability"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition cursor-pointer"
-              >
-                <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                <span className="hidden sm:inline">API Health</span>
-              </button>
-            )}
-
-            {/* Coding Agent Skills Button */}
-            <button
-              onClick={onOpenAgentSetup}
-              title="Copy Agent Skills Prompt for Claude Code, Cursor, Windsurf"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EB6658]/10 hover:bg-[#EB6658]/20 text-[#EB6658] border border-[#EB6658]/30 text-xs font-semibold transition"
-            >
-              <Terminal className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Agent Skills</span>
-            </button>
-
-            {/* Language Switcher */}
-            <div className="relative">
-              <select
-                aria-label="Select interface language"
-                value={language}
-                onChange={(e) => onLanguageChange(e.target.value as LanguageCode)}
-                className="bg-slate-900 text-xs text-slate-300 font-medium pl-6 pr-2 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 cursor-pointer outline-none focus:border-[#EB6658] appearance-none"
-              >
-                <option value="en">EN</option>
-                <option value="ar">AR (العربية)</option>
-                <option value="ko">KO (한국어)</option>
-                <option value="pt-BR">PT (Português)</option>
-              </select>
-              <Globe className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2.5 pointer-events-none" />
-            </div>
-
-            {/* GitHub Repo */}
-            <a
-              href="https://github.com/crewAIInc/crewAI"
-              target="_blank"
-              rel="noreferrer"
-              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
-              title="CrewAI on GitHub"
-            >
-              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-              </svg>
-            </a>
           </div>
         </div>
       </div>
 
       {/* Mobile navigation tab bar */}
-      <div className="lg:hidden flex items-center justify-around border-t border-slate-800 bg-slate-950/80 px-2 py-1.5 overflow-x-auto">
+      <div className="lg:hidden flex items-center justify-around border-t border-slate-800 bg-slate-950/90 px-2 py-1.5 overflow-x-auto">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = currentTab === tab.id;
           return (
             <button
               key={tab.id}
+              type="button"
               onClick={() => onTabChange(tab.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs whitespace-nowrap shrink-0 ${
                 isActive ? 'text-[#EB6658] font-semibold bg-[#EB6658]/10' : 'text-slate-400'
               }`}
             >
@@ -814,7 +767,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => setPushBanner(null)}
               className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-900/80 text-slate-300 hover:text-white cursor-pointer"
             >
-              (-)
+              Close
             </button>
           </div>
         </div>

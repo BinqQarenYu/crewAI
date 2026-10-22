@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { DocTab, LanguageCode, VersionCode, DocPage } from './types';
+import { DocTab, LanguageCode, VersionCode, DocPage, JulesContext } from './types';
 import { DOC_SECTIONS } from './data/docsContent';
 import { Navbar } from './components/Navbar';
+import { UnifiedGraphAlignmentBar } from './components/UnifiedGraphAlignmentBar';
 import { DocsBreadcrumbBar } from './components/DocsBreadcrumbBar';
 import { Sidebar, BOOKMARKS_STORAGE_KEY, RECENTLY_VIEWED_STORAGE_KEY } from './components/Sidebar';
 import { DocViewer } from './components/DocViewer';
@@ -18,7 +19,6 @@ import { JulesAgentModal } from './components/JulesAgentModal';
 import { ApiDiagnosticsModal } from './components/ApiDiagnosticsModal';
 import { AntigravityRemoteScanModal } from './components/AntigravityRemoteScanModal';
 import { GlobalCardMinMaxEnhancer } from './components/CardMinMaxControl';
-import { JulesContext } from './types';
 import { globalTaskThrottler } from './utils/taskThrottler';
 
 // Install global API polling coalescer, TTL cache, and background task concurrency throttler
@@ -26,6 +26,8 @@ globalTaskThrottler.installGlobalFetchThrottler();
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<DocTab>('studio');
+  const [flowSubView, setFlowSubView] = useState<'flow_dag' | 'graphify_repo'>('graphify_repo');
+  const [focusedLangGraphNodeId, setFocusedLangGraphNodeId] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string>('introduction');
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isAgentSetupOpen, setIsAgentSetupOpen] = useState<boolean>(false);
@@ -44,10 +46,14 @@ export const App: React.FC = () => {
   const [julesContext, setJulesContext] = useState<JulesContext | null>(null);
   const [language, setLanguage] = useState<LanguageCode>('en');
   const [version, setVersion] = useState<VersionCode>('Edge');
-  
+
   // Lifted GitHub state
-  const [selectedRepo, setSelectedRepo] = useState<string>(() => localStorage.getItem('crewai_selected_repo') || 'bingkltech/crewAI');
-  const [selectedBranch, setSelectedBranch] = useState<string>(() => localStorage.getItem('crewai_selected_branch') || 'main');
+  const [selectedRepo, setSelectedRepo] = useState<string>(
+    () => localStorage.getItem('crewai_selected_repo') || 'bingkltech/crewAI'
+  );
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    () => localStorage.getItem('crewai_selected_branch') || 'main'
+  );
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(BOOKMARKS_STORAGE_KEY);
@@ -86,10 +92,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!selectedPageId) return;
     setRecentlyViewedIds((prev) => {
-      const updated = [
-        selectedPageId,
-        ...prev.filter((id) => id !== selectedPageId),
-      ].slice(0, 5);
+      const updated = [selectedPageId, ...prev.filter((id) => id !== selectedPageId)].slice(0, 5);
       try {
         localStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(updated));
       } catch {
@@ -98,6 +101,18 @@ export const App: React.FC = () => {
       return updated;
     });
   }, [selectedPageId]);
+
+  // Global keyboard shortcut Cmd/Ctrl + K for Search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const toggleBookmark = (pageId: string) => {
     setBookmarkedIds((prev) =>
@@ -123,7 +138,12 @@ export const App: React.FC = () => {
   const activePage = allPages.find((p) => p.id === selectedPageId) || allPages[0];
 
   return (
-    <div className={`min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col ${language === 'ar' ? 'font-sans' : ''}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div
+      className={`min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col ${
+        language === 'ar' ? 'font-sans' : ''
+      }`}
+      dir={language === 'ar' ? 'rtl' : 'ltr'}
+    >
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
@@ -143,6 +163,16 @@ export const App: React.FC = () => {
         onLanguageChange={setLanguage}
         version={version}
         onVersionChange={setVersion}
+      />
+
+      {/* Unified 4-Graph Architecture Alignment Bar (Task DAG ↔ LangGraph ↔ Flow DAG ↔ Graphify) */}
+      <UnifiedGraphAlignmentBar
+        currentTab={currentTab}
+        onTabChange={(tab) => setCurrentTab(tab)}
+        selectedRepo={selectedRepo}
+        selectedBranch={selectedBranch}
+        flowSubView={flowSubView}
+        onSelectFlowSubView={(sub) => setFlowSubView(sub)}
       />
 
       {/* Breadcrumb Navigation Bar below main header in 'docs' view */}
@@ -184,8 +214,8 @@ export const App: React.FC = () => {
         )}
 
         {currentTab === 'studio' && (
-          <CrewStudio 
-            onOpenOllamaScanner={() => setIsOllamaPoolOpen(true)} 
+          <CrewStudio
+            onOpenOllamaScanner={() => setIsOllamaPoolOpen(true)}
             onNavigateToGitHub={() => setCurrentTab('github')}
             onOpenJules={(ctx) => {
               setJulesContext(ctx || null);
@@ -207,17 +237,33 @@ export const App: React.FC = () => {
           <LangGraphView
             selectedRepo={selectedRepo}
             selectedBranch={selectedBranch}
+            focusedNodeId={focusedLangGraphNodeId}
             onOpenStudio={() => setCurrentTab('studio')}
             onOpenJules={(ctx) => {
               setJulesContext(ctx || null);
               setIsJulesOpen(true);
             }}
+            onOpenGraphifyModule={() => {
+              setFlowSubView('graphify_repo');
+              setCurrentTab('flows');
+            }}
+            onOpenFlowStep={() => {
+              setFlowSubView('flow_dag');
+              setCurrentTab('flows');
+            }}
           />
         )}
         {currentTab === 'flows' && (
-          <FlowVisualizer 
+          <FlowVisualizer
             selectedRepo={selectedRepo}
             selectedBranch={selectedBranch}
+            initialSubView={flowSubView}
+            onSubViewChange={(sub) => setFlowSubView(sub)}
+            onOpenCrewStudio={() => setCurrentTab('studio')}
+            onOpenLangGraph={(lgNodeId) => {
+              if (lgNodeId) setFocusedLangGraphNodeId(lgNodeId);
+              setCurrentTab('graphs');
+            }}
             onTaskJules={(node) => {
               setJulesContext({
                 targetType: 'module',
@@ -230,7 +276,7 @@ export const App: React.FC = () => {
           />
         )}
         {currentTab === 'github' && (
-          <GitHubHub 
+          <GitHubHub
             selectedRepo={selectedRepo}
             onRepoChange={(repo) => {
               setSelectedRepo(repo);

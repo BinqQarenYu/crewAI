@@ -37,8 +37,13 @@ import {
 } from 'lucide-react';
 import { CrewConfig, AgentConfig, TaskConfig, JulesContext } from '../types';
 import { PRESET_CREWS } from './CrewStudio';
+import {
+  WORKFLOW_AUTOSAVE_KEY,
+  mapAgentToGraphifyModules,
+  broadcastWorkflowSync
+} from '../utils/unifiedGraphEngine';
 
-const AUTOSAVE_STORAGE_KEY = 'crewai_studio_workflow_autosave';
+const AUTOSAVE_STORAGE_KEY = WORKFLOW_AUTOSAVE_KEY;
 
 export type GraphTopologyPattern = 'cyclic_reflection' | 'supervisor_star' | 'sequential_gated';
 
@@ -62,6 +67,7 @@ export interface LangGraphNode {
   taskId?: string;
   model?: string;
   tools?: string[];
+  graphifyModuleIds?: string[];
   interruptBefore: boolean;
   maxRetries: number;
   stateWrites: string[];
@@ -102,8 +108,11 @@ export interface GraphCheckpoint {
 interface LangGraphViewProps {
   selectedRepo: string;
   selectedBranch: string;
+  focusedNodeId?: string | null;
   onOpenStudio?: () => void;
   onOpenJules?: (ctx?: JulesContext) => void;
+  onOpenGraphifyModule?: (moduleId: string) => void;
+  onOpenFlowStep?: (taskId?: string) => void;
 }
 
 const DEFAULT_CHANNELS: StateChannelSpec[] = [
@@ -112,6 +121,13 @@ const DEFAULT_CHANNELS: StateChannelSpec[] = [
     typeAnnotation: 'Annotated[list[AnyMessage], add_messages]',
     reducer: 'add_messages',
     description: 'Append-only multi-actor message history (collapsed via message_content_text)',
+    defaultValue: []
+  },
+  {
+    key: 'graphify_touched_modules',
+    typeAnnotation: 'Annotated[list[str], operator.add]',
+    reducer: 'operator.add',
+    description: 'Aligned Graphify repository module IDs inspected or modified by each LangGraph actor super-step',
     defaultValue: []
   },
   {
@@ -154,10 +170,13 @@ const DEFAULT_CHANNELS: StateChannelSpec[] = [
 export const LangGraphView: React.FC<LangGraphViewProps> = ({
   selectedRepo,
   selectedBranch,
+  focusedNodeId,
   onOpenStudio,
-  onOpenJules
+  onOpenJules,
+  onOpenGraphifyModule,
+  onOpenFlowStep
 }) => {
-  // Load baseline CrewConfig from CrewStudio autosave or fallback to tech_research
+  // Load baseline CrewConfig from CrewStudio autosave or fallback to full_stack_app (aligned with CrewStudio)
   const loadBaselineCrew = useCallback((): { presetKey: string; crew: CrewConfig; topic: string } => {
     try {
       const raw = localStorage.getItem(AUTOSAVE_STORAGE_KEY);
@@ -165,9 +184,9 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
         const parsed = JSON.parse(raw);
         if (parsed?.crew?.agents?.length > 0) {
           return {
-            presetKey: parsed.activePreset || 'tech_research',
+            presetKey: parsed.activePreset || 'full_stack_app',
             crew: parsed.crew,
-            topic: parsed.runInput || 'Stateful Multi-Actor Agentic Systems'
+            topic: parsed.runInput || 'Build an Enterprise SaaS Multi-Agent Control Plane'
           };
         }
       }
@@ -175,9 +194,9 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
       // ignore localStorage errors
     }
     return {
-      presetKey: 'tech_research',
-      crew: PRESET_CREWS.tech_research,
-      topic: 'Stateful Multi-Actor Agentic Systems'
+      presetKey: 'full_stack_app',
+      crew: PRESET_CREWS.full_stack_app,
+      topic: 'Build an Enterprise SaaS Multi-Agent Control Plane'
     };
   }, []);
 
@@ -216,7 +235,7 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
   const [statePatchError, setStatePatchError] = useState<string | null>(null);
 
   // Selected node & panel tab
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('');
+  const [selectedNodeId, setSelectedNodeId] = useState<string>(focusedNodeId || '');
   const [rightPanelTab, setRightPanelTab] = useState<'inspector' | 'state' | 'checkpoints' | 'code'>('inspector');
   const [codeLang, setCodeLang] = useState<'python' | 'typescript'>('python');
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
@@ -235,6 +254,35 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
     setTimeout(() => setSyncBanner(null), 3200);
   };
 
+  useEffect(() => {
+    if (focusedNodeId) {
+      setSelectedNodeId(focusedNodeId);
+    }
+  }, [focusedNodeId]);
+
+  // Listen to real-time workflow sync across CrewStudio, UnifiedGraphAlignmentBar, FlowVisualizer, and Graphify
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.crew) {
+        setPresetKey(detail.activePreset || 'full_stack_app');
+        setBaselineCrew(detail.crew);
+        if (detail.runInput) setInputTopic(detail.runInput);
+      } else {
+        const fresh = loadBaselineCrew();
+        setPresetKey(fresh.presetKey);
+        setBaselineCrew(fresh.crew);
+        setInputTopic(fresh.topic);
+      }
+    };
+    window.addEventListener('crewai:workflow-synced', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('crewai:workflow-synced', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [loadBaselineCrew]);
+
   const handleSyncFromCrewStudio = () => {
     const fresh = loadBaselineCrew();
     setPresetKey(fresh.presetKey);
@@ -251,22 +299,13 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
     setCheckpoints([]);
     setActiveCheckpointIdx(-1);
     setIsInterrupted(false);
-    // Also persist to CrewStudio autosave so both tabs stay synchronized
-    try {
-      localStorage.setItem(
-        AUTOSAVE_STORAGE_KEY,
-        JSON.stringify({
-          activePreset: newPresetKey,
-          crew: preset,
-          selectedAgentId: preset.agents[0]?.id || '',
-          runInput: inputTopic,
-          savedAt: new Date().toISOString()
-        })
-      );
-    } catch {
-      // ignore
-    }
-    triggerBanner(`Loaded baseline "${preset.name}" into LangGraph StateGraph`);
+    broadcastWorkflowSync({
+      activePreset: newPresetKey,
+      crew: preset,
+      selectedAgentId: preset.agents[0]?.id || '',
+      runInput: inputTopic
+    });
+    triggerBanner(`Synchronized "${preset.name}" across LangGraph, Task DAG, Flow DAG & Graphify`);
   };
 
   // Build LangGraph Nodes & Edges dynamically from baselineCrew + topologyPattern
@@ -324,6 +363,7 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
         const assignedTask = tasks.find((t) => t.agentId === agent.id) || tasks[idx];
         const actorNodeId = `actor_${agent.id}`;
         const yPos = Math.round(startY + idx * spacing);
+        const graphifyMods = mapAgentToGraphifyModules(agent, assignedTask);
 
         builtNodes.push({
           id: actorNodeId,
@@ -336,10 +376,11 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
           taskId: assignedTask?.id,
           model: agent.model,
           tools: agent.tools,
+          graphifyModuleIds: graphifyMods,
           interruptBefore: !!interruptNodeIds[actorNodeId],
           maxRetries: nodeRetries[actorNodeId] || 3,
-          stateWrites: ['messages', 'task_artifacts', 'revision_count'],
-          description: `CrewAI Agent node executing "${assignedTask?.name || agent.goal}". Emits Command(goto="supervisor_router") on completion.`
+          stateWrites: ['messages', 'task_artifacts', 'graphify_touched_modules', 'revision_count'],
+          description: `CrewAI Agent node executing "${assignedTask?.name || agent.goal}" (Graphify Modules: ${graphifyMods.join(', ')}). Emits Command(goto="supervisor_router") on completion.`
         });
 
         // Conditional edge from supervisor -> actor
@@ -369,6 +410,7 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
         kind: 'human_gate',
         x: 760,
         y: 230,
+        graphifyModuleIds: ['unified-graph-engine-ts', 'githubhub-tsx'],
         interruptBefore: interruptNodeIds['human_gate'] ?? true,
         maxRetries: 1,
         stateWrites: ['human_approval'],
@@ -383,6 +425,7 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
         kind: 'end',
         x: 940,
         y: 230,
+        graphifyModuleIds: ['graphify-repo-tsx', 'standalone-bat'],
         interruptBefore: false,
         maxRetries: 1,
         stateWrites: [],
@@ -404,8 +447,16 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
         kind: 'normal'
       });
     } else {
-      // cyclic_reflection or sequential_gated
+      // cyclic_reflection or sequential_gated — aligned with CrewStudio Task Dependency DAG (`dependsOnTaskIds`)
       const stepX = agents.length > 2 ? 190 : 220;
+      const actorNodeByTaskId: Record<string, string> = {};
+      tasks.forEach((t, idx) => {
+        const ag = agents.find((a) => a.id === t.agentId) || agents[idx % Math.max(1, agents.length)];
+        if (ag) {
+          actorNodeByTaskId[t.id] = `actor_${ag.id}`;
+        }
+      });
+
       let prevNodeId = '__start__';
 
       agents.forEach((agent, idx) => {
@@ -413,6 +464,7 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
         const actorNodeId = `actor_${agent.id}`;
         const xPos = 220 + idx * stepX;
         const yPos = 200;
+        const graphifyMods = mapAgentToGraphifyModules(agent, assignedTask);
 
         builtNodes.push({
           id: actorNodeId,
@@ -425,18 +477,36 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
           taskId: assignedTask?.id,
           model: agent.model,
           tools: agent.tools,
+          graphifyModuleIds: graphifyMods,
           interruptBefore: !!interruptNodeIds[actorNodeId],
           maxRetries: nodeRetries[actorNodeId] || 3,
-          stateWrites: ['messages', 'task_artifacts', 'current_actor'],
-          description: `CrewAI Actor Node bound to Task "${assignedTask?.name || 'Specialist Execution'}". Updates shared state channels.`
+          stateWrites: ['messages', 'task_artifacts', 'graphify_touched_modules', 'current_actor'],
+          description: `CrewAI Actor Node bound to Task "${assignedTask?.name || 'Specialist Execution'}" • Graphify Repo Modules: [${graphifyMods.join(', ')}].`
         });
 
-        builtEdges.push({
-          id: `e-${prevNodeId}-${actorNodeId}`,
-          source: prevNodeId,
-          target: actorNodeId,
-          kind: 'normal'
-        });
+        // Wire edges aligned with `assignedTask.dependsOnTaskIds` when defined
+        const explicitDepNodes = (assignedTask?.dependsOnTaskIds || [])
+          .map((depTaskId) => actorNodeByTaskId[depTaskId])
+          .filter((nodeId): nodeId is string => Boolean(nodeId && nodeId !== actorNodeId));
+
+        if (explicitDepNodes.length > 0) {
+          Array.from(new Set(explicitDepNodes)).forEach((depNodeId) => {
+            builtEdges.push({
+              id: `e-${depNodeId}-${actorNodeId}`,
+              source: depNodeId,
+              target: actorNodeId,
+              kind: 'normal',
+              conditionLabel: assignedTask?.phase ? assignedTask.phase.split(':')[0] : undefined
+            });
+          });
+        } else {
+          builtEdges.push({
+            id: `e-${prevNodeId}-${actorNodeId}`,
+            source: prevNodeId,
+            target: actorNodeId,
+            kind: 'normal'
+          });
+        }
 
         // Attach a ToolNode below the actor if it has tools
         if (agent.tools && agent.tools.length > 0) {
@@ -449,6 +519,7 @@ export const LangGraphView: React.FC<LangGraphViewProps> = ({
             x: xPos,
             y: 365,
             tools: agent.tools,
+            graphifyModuleIds: graphifyMods,
             interruptBefore: !!interruptNodeIds[toolNodeId],
             maxRetries: 2,
             stateWrites: ['messages'],
@@ -1609,15 +1680,14 @@ export const appGraph = workflow.compile({
             <span className="text-xs text-slate-400">CrewAI Baseline:</span>
             <select
               aria-label="Select CrewAI Baseline Preset"
-              value={presetKey}
+              value={PRESET_CREWS[presetKey] ? presetKey : 'full_stack_app'}
               onChange={(e) => handlePresetChange(e.target.value)}
               className="bg-slate-950 text-xs text-white font-semibold px-2.5 py-1 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658] cursor-pointer"
             >
-              <option value="tech_research">AI & Tech Research Crew</option>
-              <option value="full_stack_app">Full Stack App Development</option>
-              <option value="financial_audit">FinTech Risk & Audit Crew</option>
-              <option value="devops_deployment">Autonomous DevOps & SRE Crew</option>
-              <option value="content_strategy">Multi-Channel Content Synthesis</option>
+              <option value="full_stack_app">Full-Stack App Development (8 Agents · 8 Tasks)</option>
+              <option value="tech_research">Deep Tech Research Crew</option>
+              <option value="code_audit">Security & Code Audit Crew</option>
+              <option value="growth_marketing">Growth & Launch Strategy Crew</option>
             </select>
           </div>
 
@@ -2676,6 +2746,39 @@ export const appGraph = workflow.compile({
                   ) : (
                     <span className="text-xs text-slate-500">Read-only terminal sink node</span>
                   )}
+                </div>
+              </div>
+
+              {/* Aligned Graphify Repository Modules & Event Flow Step */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Aligned Graphify Repo Modules ({selectedNode.graphifyModuleIds?.length || 0})
+                  </span>
+                  {onOpenFlowStep && selectedNode.taskId && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenFlowStep(selectedNode.taskId)}
+                      className="text-[11px] font-semibold text-amber-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>View @Flow Step</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(selectedNode.graphifyModuleIds || ['unified-graph-engine-ts']).map((modId) => (
+                    <button
+                      key={modId}
+                      type="button"
+                      onClick={() => onOpenGraphifyModule?.(modId)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs font-mono text-emerald-300 transition flex items-center gap-1 cursor-pointer"
+                      title="Click to inspect this repository module in Graphify"
+                    >
+                      <GitFork className="w-3 h-3" />
+                      <span>{modId}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 

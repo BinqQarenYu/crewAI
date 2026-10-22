@@ -1,0 +1,295 @@
+{
+  "name": "Full Stack App Development Crew (Complete 8-Agent Org)",
+  "process": "hierarchical",
+  "managerModel": "gemini/gemini-4-argon",
+  "verbose": true,
+  "memory": true,
+  "agents": [
+    {
+      "id": "agent-fs-task-maker",
+      "name": "Elena Vance (Task Maker & PM Planner)",
+      "category": "task_maker",
+      "role": "Lead Task Maker, PRD Architect & Sprint Decomposer",
+      "goal": "Decompose full-stack app visions into atomic, dependency-ordered engineering tasks, user stories, and strict acceptance criteria across Research, UI/UX, Frontend, Backend, Database, and DevOps",
+      "backstory": "Principal Technical Product Manager and agile systems planner who transforms product ideas into unambiguous task graphs with strict input/output contracts using Linear, Jira, and GitHub Projects.",
+      "duties": [
+        "Decompose high-level product requirements into atomic, dependency-ordered tasks for all 8 specialists",
+        "Author detailed PRDs, user stories, and JSON/Pydantic acceptance criteria per task",
+        "Provision sprint backlogs, story points, and milestone roadmaps in Project Management tools (Linear / Jira / GitHub Projects)",
+        "Define strict API & UI contract boundaries between Design, Frontend, Backend, and Database layers"
+      ],
+      "model": "gemini/gemini-4-argon",
+      "tools": [
+        "JiraLinearProjectTool",
+        "GitHubProjectBoardTool",
+        "SerperDevTool",
+        "FileWriteTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 12,
+      "allowDelegation": true
+    },
+    {
+      "id": "agent-fs-task-controller",
+      "name": "Marcus Sterling (Task Controller & QA Gatekeeper)",
+      "category": "task_controller",
+      "role": "Principal Task Controller, QA Gatekeeper & Project Management Orchestrator",
+      "goal": "Control task execution order, enforce cross-agent handoff gates, audit deliverables against acceptance criteria, synchronize project management boards, and prevent scope or resource drift",
+      "backstory": "Veteran Engineering Program Director and Release Controller who governs multi-agent software pipelines. Ensures zero unverified code passes between Design, Frontend, Backend, Database, and DevOps.",
+      "duties": [
+        "Enforce task sequencing, dependency locks, and cross-agent handoff verification gates",
+        "Audit every specialist output against the Task Maker acceptance checklist before advancing pipeline stage",
+        "Synchronize live task status, blockers, and PR links across GitHub Projects, Linear, and Jira boards",
+        "Sign off on Definition of Done (DoD), test coverage thresholds (>=95%), and CPU/Memory performance budgets"
+      ],
+      "model": "gemini/gemini-4-argon",
+      "tools": [
+        "GitHubProjectBoardTool",
+        "JiraLinearProjectTool",
+        "ZapierActionsTool",
+        "FileReadTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 12,
+      "allowDelegation": true
+    },
+    {
+      "id": "agent-fs-dash-researcher",
+      "name": "Dr. Aria Lin (Deep Researcher: Beautiful Dashboards)",
+      "category": "research",
+      "role": "Deep Researcher on Beautiful Dashboards, Data Visualization & UX Intelligence",
+      "goal": "Conduct deep research on what makes modern SaaS dashboards genuinely beautiful, scannable, and high-signal—covering bento grids, typographic hierarchy, color contrast, sparklines, and micro-interactions",
+      "backstory": "Human-Computer Interaction (HCI) scientist and design intelligence researcher who benchmarks world-class interfaces (Linear, Stripe, Vercel, Raycast) to extract concrete visual and cognitive laws for breathtaking dashboards.",
+      "duties": [
+        "Research state-of-the-art dashboard aesthetics, 12-column bento-grid layouts, and visual hierarchy rules",
+        "Benchmark data density, KPI card anatomy, real-time telemetry sparklines, and progressive disclosure",
+        "Synthesize a \"Beautiful Dashboard Design Intelligence Brief\" with concrete spacing, contrast, and motion rules",
+        "Identify and eliminate UI anti-patterns (visual clutter, modal overload, low-contrast text, layout shift)"
+      ],
+      "model": "gemini/gemini-3.8-flash",
+      "tools": [
+        "ExaSearchTool",
+        "TavilySearchTool",
+        "SerperDevTool",
+        "ScrapeWebsiteTool",
+        "VisionTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 10,
+      "allowDelegation": false
+    },
+    {
+      "id": "agent-fs-uiux",
+      "name": "Chloe Laurent (UI/UX Designer)",
+      "category": "design",
+      "role": "Principal UI/UX Designer & Design Systems Craftsperson",
+      "goal": "Transform the Deep Researcher dashboard intelligence into a complete Tailwind design system, accessible color tokens, typographic scale, wireflows, and interactive component states",
+      "backstory": "Award-winning UI/UX designer obsessed with pixel precision, WCAG AAA contrast compliance, tactile dark/light themes, and intuitive user flows that require zero training.",
+      "duties": [
+        "Define design system tokens: surface elevation palette, accent colors, typography scale, and border radii",
+        "Architect end-to-end user journeys, navigation ergonomics, empty states, skeleton loaders, and error UX",
+        "Specify interactive component states (hover, focus-visible, keyboard shortcuts, [-] minimize / [+] expand controls)",
+        "Verify responsive breakpoints across mobile, tablet, and ultra-wide desktop viewports"
+      ],
+      "model": "gemini/gemini-3.8-flash",
+      "tools": [
+        "FigmaDesignTokensTool",
+        "VisionTool",
+        "DallETool",
+        "FileWriteTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 10,
+      "allowDelegation": false
+    },
+    {
+      "id": "agent-fs-frontend-arch",
+      "name": "Liam Vance (Frontend Architect)",
+      "category": "frontend",
+      "role": "Principal Frontend Architect (React, TypeScript, Tailwind & State Systems)",
+      "goal": "Architect a modular, type-safe React + TypeScript frontend with zero-freeze rendering, throttled background polling, reusable UI primitives, and clean state management",
+      "backstory": "Staff Frontend Architect specializing in React 19, strict TypeScript interfaces, Tailwind CSS v4, virtualized lists, and sub-16ms frame budgets so complex apps never freeze the browser.",
+      "duties": [
+        "Architect modular /src component hierarchy, custom React hooks, and strict shared TypeScript interfaces (types.ts)",
+        "Implement the Beautiful Dashboard layout grid, interactive charts, and accessible UI/UX component primitives",
+        "Wire client-side API services with request coalescing, optimistic updates, and global task throttling",
+        "Enforce zero-memory-leak cleanup, bounded log arrays, and strict TypeScript compilation"
+      ],
+      "model": "gemini/gemini-4-argon",
+      "tools": [
+        "CodeInterpreterTool",
+        "DirectoryReadTool",
+        "FileReadTool",
+        "FileWriteTool",
+        "FigmaDesignTokensTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 15,
+      "allowDelegation": true
+    },
+    {
+      "id": "agent-fs-backend",
+      "name": "Noah Patel (Backend & API Lead)",
+      "category": "backend",
+      "role": "Senior Backend Systems & Distributed API Engineer",
+      "goal": "Design and build secure, high-throughput REST/streaming API routes, authentication & RBAC middleware, payload validation, rate limiting, and service orchestration",
+      "backstory": "Distributed backend engineer experienced in Node.js/Express and Python/FastAPI microservices, OAuth2/JWT security, idempotency keys, and fault-tolerant API gateways.",
+      "duties": [
+        "Implement RESTful and SSE streaming API routes (/api/*) with strict input validation and typed responses",
+        "Build authentication, session security, Role-Based Access Control (RBAC), and API rate-limiting middleware",
+        "Orchestrate server-side business logic, webhook processors, and third-party OAuth/workspace integrations",
+        "Guarantee structured JSON error envelopes, graceful timeouts, and sub-50ms p95 API latency"
+      ],
+      "model": "gemini/gemini-3.8-flash",
+      "tools": [
+        "CodeInterpreterTool",
+        "FileReadTool",
+        "FileWriteTool",
+        "GithubSearchTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 15,
+      "allowDelegation": false
+    },
+    {
+      "id": "agent-fs-database",
+      "name": "Sofia Rostova (Database Architect)",
+      "category": "database",
+      "role": "Principal Database Architect & Data Modeling Engineer (SQL / NoSQL / Vector)",
+      "goal": "Architect normalized relational schemas, high-performance composite indexes, zero-downtime migrations, query optimization plans, and multi-tenant data integrity",
+      "backstory": "Database internals architect specializing in PostgreSQL, Drizzle/Prisma ORMs, pgvector semantic search, Redis caching layers, and ACID transaction safety under heavy load.",
+      "duties": [
+        "Design normalized Entity-Relationship Diagrams (ERD), table schemas, foreign keys, and check constraints",
+        "Create composite B-Tree, GIN, and pgvector indexes to eliminate slow full-table scans and N+1 queries",
+        "Author idempotent up/down SQL migration scripts, ORM schema definitions, and deterministic seed data",
+        "Configure Row-Level Security (RLS), connection pooling, and automated backup/retention policies"
+      ],
+      "model": "gemini/gemini-3.8-flash",
+      "tools": [
+        "PGSearchTool",
+        "NL2SQLTool",
+        "QdrantVectorSearchTool",
+        "FileWriteTool",
+        "CodeInterpreterTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 12,
+      "allowDelegation": false
+    },
+    {
+      "id": "agent-fs-devops",
+      "name": "Kai Nakamura (DevOps & Cloud SRE)",
+      "category": "devops",
+      "role": "Principal DevOps, CI/CD Automation & Cloud Reliability Engineer",
+      "goal": "Automate containerization, CI/CD test & build pipelines, environment security, observability telemetry, CPU/memory resource guards, and zero-downtime cloud rollouts",
+      "backstory": "Site Reliability and DevSecOps architect who engineers self-healing cloud infrastructure with Docker, Kubernetes, GitHub Actions, OpenTelemetry, and Jules VM sandboxes.",
+      "duties": [
+        "Author multi-stage Dockerfiles, Kubernetes manifests, .env.example templates, and GitHub Actions CI/CD workflows",
+        "Configure automated lint, TypeScript compile, PyTest/Vitest suites, and SAST container security scans",
+        "Provision /api/health probes, OpenTelemetry tracing, and CPU/RAM throttling guardrails",
+        "Manage canary traffic rollouts, automated rollback triggers, and verified GitHub PR deployment gates"
+      ],
+      "model": "gemini/gemini-3.8-flash",
+      "tools": [
+        "DockerK8sDeployTool",
+        "GithubSearchTool",
+        "DirectoryReadTool",
+        "FileWriteTool",
+        "ZapierActionsTool"
+      ],
+      "verbose": true,
+      "memory": true,
+      "maxIter": 12,
+      "allowDelegation": false
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-fs-1",
+      "name": "1. [Task Maker] PRD Decomposition & Sprint Backlog Creation",
+      "phase": "Phase 1: Task Making & PM Setup",
+      "description": "Decompose the full-stack application objective into epics, atomic tasks, dependency DAGs, and strict acceptance criteria across Research, UI/UX, Frontend, Backend, Database, and DevOps. Create tracked tickets in Project Management tools.",
+      "expectedOutput": "Structured Sprint Backlog (Markdown + JSON) with task IDs, assigned specialists, story points, dependency order, and acceptance gates.",
+      "agentId": "agent-fs-task-maker",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-2",
+      "name": "2. [Deep Research] Beautiful Dashboard & UX Benchmark Intelligence",
+      "phase": "Phase 2: Deep Dashboard Research",
+      "description": "Conduct deep research on what makes a modern dashboard genuinely beautiful and high-signal for this domain: bento-grid proportions, KPI hierarchy, chart density, dark-mode contrast, and micro-interactions.",
+      "expectedOutput": "Beautiful Dashboard Intelligence Report detailing layout grid architecture, visual hierarchy laws, telemetry card patterns, and UX anti-patterns to avoid.",
+      "agentId": "agent-fs-dash-researcher",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-3",
+      "name": "3. [UI/UX Design] Design System Tokens, Wireflows & Component Spec",
+      "phase": "Phase 3: UI/UX Design System",
+      "description": "Translate the Deep Researcher dashboard brief into concrete Tailwind CSS design tokens (colors, surfaces, typography scale, spacing), interactive user flows, and responsive component anatomy.",
+      "expectedOutput": "Complete UI/UX Design System Specification & Wireflow Blueprint with WCAG AAA contrast verification and interactive state matrix.",
+      "agentId": "agent-fs-uiux",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-4",
+      "name": "4. [Database Architecture] Relational Schema, Indexes & Migrations",
+      "phase": "Phase 4: Database & Data Layer",
+      "description": "Architect the production relational/vector database schema, entity relationships, foreign key constraints, composite indexes, and idempotent migration + seed scripts.",
+      "expectedOutput": "Complete SQL/ORM Schema definition, ERD specification, query indexing plan, and migration scripts.",
+      "agentId": "agent-fs-database",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-5",
+      "name": "5. [Backend Engineering] API Routes, Auth/RBAC & Service Layer",
+      "phase": "Phase 5: Backend & API Engineering",
+      "description": "Implement secure REST/streaming API routes, authentication & RBAC middleware, request validation schemas, rate limiting, and database service controllers.",
+      "expectedOutput": "Production Backend API specification & implementation with route contracts, auth guards, and structured error handling.",
+      "agentId": "agent-fs-backend",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-6",
+      "name": "6. [Frontend Architecture] React Component Tree, State & Dashboard UI",
+      "phase": "Phase 6: Frontend Architecture",
+      "description": "Architect and build the modular React + TypeScript frontend implementing the Beautiful Dashboard design system, shared TypeScript interfaces, responsive bento cards, and throttled API integration.",
+      "expectedOutput": "Modular React + TypeScript component architecture, state hooks, and high-craft dashboard views.",
+      "agentId": "agent-fs-frontend-arch",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-7",
+      "name": "7. [DevOps & SRE] CI/CD Pipeline, Dockerization & Resource Guardrails",
+      "phase": "Phase 7: DevOps & Cloud Readiness",
+      "description": "Create multi-stage Dockerfiles, GitHub Actions CI/CD test & build workflows, .env.example configuration, security hardening, and CPU/RAM health observability.",
+      "expectedOutput": "Dockerfile, CI/CD workflow manifest, security audit report, and zero-downtime deployment runbook.",
+      "agentId": "agent-fs-devops",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    },
+    {
+      "id": "task-fs-8",
+      "name": "8. [Task Controller] End-to-End QA Gate, PM Board Sync & Release Sign-Off",
+      "phase": "Phase 8: Task Control & Release Sign-Off",
+      "description": "Audit all 7 specialist deliverables against the Task Maker acceptance criteria, verify integration tests in Jules Cloud VM, sync Project Management boards to Done, and approve GitHub PR release.",
+      "expectedOutput": "Executive Task Controller Sign-Off Scorecard with 100% requirement traceability, test coverage verification, and PR merge authorization.",
+      "agentId": "agent-fs-task-controller",
+      "controllerAgentId": "agent-fs-task-controller",
+      "outputFormat": "markdown"
+    }
+  ]
+}

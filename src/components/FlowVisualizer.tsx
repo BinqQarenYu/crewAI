@@ -1,13 +1,13 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
-  GitMerge, 
-  Play, 
-  RotateCcw, 
-  CheckCircle2, 
-  ArrowRight, 
-  Copy, 
-  Check, 
-  Database, 
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  GitMerge,
+  Play,
+  RotateCcw,
+  CheckCircle2,
+  ArrowRight,
+  Copy,
+  Check,
+  Database,
   Terminal,
   GitFork,
   ZoomIn,
@@ -16,129 +16,124 @@ import {
   Compass,
   Move,
   Crosshair,
-  Maximize2
+  Maximize2,
+  Network,
+  Layers,
+  ShieldCheck
 } from 'lucide-react';
 import { GraphifyRepoVisualizer } from './GraphifyRepoVisualizer';
-
-interface FlowStepDef {
-  id: string;
-  type: 'start' | 'listen' | 'router' | 'and_step';
-  title: string;
-  decorator: string;
-  description: string;
-  outputStateChange: Record<string, any>;
-  nextNodes?: string[];
-  x: number;
-  y: number;
-}
-
-const INITIAL_DEMO_FLOW: FlowStepDef[] = [
-  {
-    id: 'step_strategy',
-    type: 'start',
-    title: 'define_strategy()',
-    decorator: '@start()',
-    description: 'Product Lead (Alex): Scans market trends and generates the Product Requirement Document (PRD) with user stories.',
-    outputStateChange: {
-      prd_status: 'drafted',
-      user_stories_count: 12,
-      target_tech_stack: 'React/Vite/Express',
-      strategy_ready: true
-    },
-    nextNodes: ['step_architecture'],
-    x: 40,
-    y: 40
-  },
-  {
-    id: 'step_architecture',
-    type: 'router',
-    title: 'architect_system()',
-    decorator: '@router(define_strategy)',
-    description: 'Senior Dev (Jordan): Designs the database schema, ERDs, and modular API route structure based on Alex\'s PRD.',
-    outputStateChange: {
-      schema_defined: true,
-      api_routes_count: 8,
-      frontend_components: ['Navbar', 'Dashboard', 'AuthGuard'],
-      architecture_complete: true
-    },
-    nextNodes: ['step_security'],
-    x: 380,
-    y: 40
-  },
-  {
-    id: 'step_security',
-    type: 'listen',
-    title: 'audit_security()',
-    decorator: '@listen(architect_system)',
-    description: 'Security Auditor (Sam): Performs threat modeling and configures the CI/CD pipeline and Docker environment.',
-    outputStateChange: {
-      vulnerabilities_checked: 0,
-      docker_image_built: true,
-      cicd_pipeline: 'GitHub Actions',
-      security_verified: true
-    },
-    nextNodes: ['step_graphify'],
-    x: 380,
-    y: 230
-  },
-  {
-    id: 'step_graphify',
-    type: 'listen',
-    title: 'sync_graphify_knowledge()',
-    decorator: '@listen(audit_security)',
-    description: 'Graphify Engine: Automatically updates the whole-repository knowledge graph with new modules, imports, and cross-file dependencies.',
-    outputStateChange: {
-      graphify_sync_status: 'synced',
-      knowledge_graph_nodes: 18,
-      entry_points_detected: ['main.tsx', 'server.ts'],
-      last_architectural_audit: new Date().toISOString().split('T')[0]
-    },
-    nextNodes: ['step_release'],
-    x: 40,
-    y: 230
-  },
-  {
-    id: 'step_release',
-    type: 'listen',
-    title: 'release_production()',
-    decorator: '@listen(sync_graphify_knowledge)',
-    description: 'Final Deployment: Orchestrates the production push to Google Cloud / Vercel with zero-downtime cutover.',
-    outputStateChange: {
-      deployment_url: 'https://ais-production-deploy-2026.run.app',
-      uptime_sla: '99.9%',
-      project_live: true
-    },
-    nextNodes: [],
-    x: 210,
-    y: 410
-  }
-];
+import { CrewConfig } from '../types';
+import { PRESET_CREWS } from './CrewStudio';
+import {
+  AlignedFlowStepDef,
+  WORKFLOW_AUTOSAVE_KEY,
+  buildAlignedFlowStepsFromCrew,
+  generateAlignedFlowPythonCode
+} from '../utils/unifiedGraphEngine';
 
 interface FlowVisualizerProps {
   onTaskJules?: (node: any) => void;
   selectedRepo: string;
   selectedBranch: string;
+  initialSubView?: 'flow_dag' | 'graphify_repo';
+  onSubViewChange?: (view: 'flow_dag' | 'graphify_repo') => void;
+  onOpenLangGraph?: (langGraphNodeId?: string) => void;
+  onOpenCrewStudio?: () => void;
 }
 
-export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({ 
+export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
   onTaskJules,
   selectedRepo,
-  selectedBranch
+  selectedBranch,
+  initialSubView = 'graphify_repo',
+  onSubViewChange,
+  onOpenLangGraph,
+  onOpenCrewStudio
 }) => {
-  const [activeView, setActiveView] = useState<'flow_dag' | 'graphify_repo'>('graphify_repo');
-  const [flowSteps, setFlowSteps] = useState<FlowStepDef[]>(INITIAL_DEMO_FLOW);
-  const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
-  const [selectedStepId, setSelectedStepId] = useState<string>('step_strategy');
+  const loadActiveCrew = useCallback((): CrewConfig => {
+    try {
+      const raw = localStorage.getItem(WORKFLOW_AUTOSAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.crew?.agents?.length > 0) {
+          return parsed.crew;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return PRESET_CREWS.full_stack_app;
+  }, []);
+
+  const [activeView, setActiveView] = useState<'flow_dag' | 'graphify_repo'>(initialSubView);
+  const [activeCrew, setActiveCrew] = useState<CrewConfig>(loadActiveCrew);
+  const [focusedGraphifyModuleId, setFocusedGraphifyModuleId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveView(initialSubView);
+  }, [initialSubView]);
+
+  const switchSubView = (next: 'flow_dag' | 'graphify_repo') => {
+    setActiveView(next);
+    onSubViewChange?.(next);
+  };
+
+  // Keep synced with CrewStudio & LangGraph changes
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.crew) {
+        setActiveCrew(detail.crew);
+      } else {
+        setActiveCrew(loadActiveCrew());
+      }
+    };
+    window.addEventListener('crewai:workflow-synced', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('crewai:workflow-synced', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [loadActiveCrew]);
+
+  const baseFlowSteps = useMemo(
+    () => buildAlignedFlowStepsFromCrew(activeCrew, selectedRepo),
+    [activeCrew, selectedRepo]
+  );
+
+  const [stepPositionOverrides, setStepPositionOverrides] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+
+  const flowSteps: AlignedFlowStepDef[] = useMemo(() => {
+    return baseFlowSteps.map((s) => {
+      const over = stepPositionOverrides[s.id];
+      return over ? { ...s, x: over.x, y: over.y } : s;
+    });
+  }, [baseFlowSteps, stepPositionOverrides]);
+
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const [selectedStepId, setSelectedStepId] = useState<string>(
+    () => baseFlowSteps[0]?.id || 'flow_sync_graphify'
+  );
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [, setStateHistory] = useState<Array<Record<string, any>>>([]);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (flowSteps.length > 0 && !flowSteps.some((s) => s.id === selectedStepId)) {
+      setSelectedStepId(flowSteps[0].id);
+      setCurrentStepIndex(0);
+    }
+  }, [flowSteps, selectedStepId]);
+
+  const selectedStep =
+    flowSteps.find((s) => s.id === selectedStepId) || flowSteps[0];
 
   // Interactive Pan, Zoom & Drag State for Workflow DAG Canvas
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 24, y: 20 });
-  const [zoom, setZoom] = useState<number>(0.92);
+  const [zoom, setZoom] = useState<number>(0.88);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [draggingStepId, setDraggingStepId] = useState<string | null>(null);
-  const [hasCustomPositions, setHasCustomPositions] = useState<boolean>(false);
 
   const dagContainerRef = useRef<HTMLDivElement>(null);
   const pointerStartRef = useRef<{
@@ -152,7 +147,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
     clientY: 0,
     originX: 0,
     originY: 0,
-    moved: false,
+    moved: false
   });
 
   // Cursor-centered wheel zoom for Workflow DAG
@@ -172,7 +167,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
         const scaleRatio = nextZoom / prevZoom;
         setPan((prevPan) => ({
           x: Math.round(mouseX - (mouseX - prevPan.x) * scaleRatio),
-          y: Math.round(mouseY - (mouseY - prevPan.y) * scaleRatio),
+          y: Math.round(mouseY - (mouseY - prevPan.y) * scaleRatio)
         }));
         return nextZoom;
       });
@@ -182,37 +177,34 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [activeView]);
 
-  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
-    if (!isPanning && !draggingStepId) return;
+  const handleGlobalMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isPanning && !draggingStepId) return;
 
-    const dx = e.clientX - pointerStartRef.current.clientX;
-    const dy = e.clientY - pointerStartRef.current.clientY;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-      pointerStartRef.current.moved = true;
-    }
+      const dx = e.clientX - pointerStartRef.current.clientX;
+      const dy = e.clientY - pointerStartRef.current.clientY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        pointerStartRef.current.moved = true;
+      }
 
-    if (isPanning) {
-      setPan({
-        x: Math.round(pointerStartRef.current.originX + dx),
-        y: Math.round(pointerStartRef.current.originY + dy),
-      });
-    } else if (draggingStepId) {
-      const scaledDx = dx / zoom;
-      const scaledDy = dy / zoom;
-      setFlowSteps((prev) =>
-        prev.map((step) =>
-          step.id === draggingStepId
-            ? {
-                ...step,
-                x: Math.max(10, Math.min(1100, Math.round(pointerStartRef.current.originX + scaledDx))),
-                y: Math.max(10, Math.min(900, Math.round(pointerStartRef.current.originY + scaledDy))),
-              }
-            : step
-        )
-      );
-      setHasCustomPositions(true);
-    }
-  }, [isPanning, draggingStepId, zoom]);
+      if (isPanning) {
+        setPan({
+          x: Math.round(pointerStartRef.current.originX + dx),
+          y: Math.round(pointerStartRef.current.originY + dy)
+        });
+      } else if (draggingStepId) {
+        const scaledDx = dx / zoom;
+        const scaledDy = dy / zoom;
+        const nextX = Math.max(10, Math.min(1150, Math.round(pointerStartRef.current.originX + scaledDx)));
+        const nextY = Math.max(10, Math.min(950, Math.round(pointerStartRef.current.originY + scaledDy)));
+        setStepPositionOverrides((prev) => ({
+          ...prev,
+          [draggingStepId]: { x: nextX, y: nextY }
+        }));
+      }
+    },
+    [isPanning, draggingStepId, zoom]
+  );
 
   const handleGlobalMouseUp = useCallback(() => {
     setIsPanning(false);
@@ -238,11 +230,11 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
       clientY: e.clientY,
       originX: pan.x,
       originY: pan.y,
-      moved: false,
+      moved: false
     };
   };
 
-  const handleStepNodeMouseDown = (e: React.MouseEvent, step: FlowStepDef, index: number) => {
+  const handleStepNodeMouseDown = (e: React.MouseEvent, step: AlignedFlowStepDef, index: number) => {
     e.stopPropagation();
     if (e.button !== 0) return;
     setSelectedStepId(step.id);
@@ -253,7 +245,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
       clientY: e.clientY,
       originX: step.x,
       originY: step.y,
-      moved: false,
+      moved: false
     };
   };
 
@@ -267,7 +259,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
       const scaleRatio = nextZoom / prevZoom;
       setPan((prevPan) => ({
         x: Math.round(centerX - (centerX - prevPan.x) * scaleRatio),
-        y: Math.round(centerY - (centerY - prevPan.y) * scaleRatio),
+        y: Math.round(centerY - (centerY - prevPan.y) * scaleRatio)
       }));
       return nextZoom;
     });
@@ -275,7 +267,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
 
   const handleFitDagView = () => {
     setPan({ x: 24, y: 20 });
-    setZoom(0.92);
+    setZoom(0.88);
   };
 
   const handleCenterOnStep = (stepId?: string) => {
@@ -288,56 +280,55 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
     const centerY = container.clientHeight / 2;
     setZoom(targetZoom);
     setPan({
-      x: Math.round(centerX - (target.x + 140) * targetZoom),
-      y: Math.round(centerY - (target.y + 65) * targetZoom),
+      x: Math.round(centerX - (target.x + 150) * targetZoom),
+      y: Math.round(centerY - (target.y + 70) * targetZoom)
     });
   };
 
   const handleResetStepLayout = () => {
-    setFlowSteps(INITIAL_DEMO_FLOW);
-    setHasCustomPositions(false);
+    setStepPositionOverrides({});
     handleFitDagView();
   };
 
-  // Compute accumulated state up to currentStepIndex
-  const currentMergedState = () => {
+  const hasCustomPositions = Object.keys(stepPositionOverrides).length > 0;
+
+  // Compute accumulated Pydantic Flow State up to currentStepIndex
+  const currentMergedState = useMemo(() => {
+    const touchedModules = new Set<string>();
+    const completedSteps: string[] = [];
     let state: Record<string, any> = {
       project_name: selectedRepo.split('/')[1] || 'crewai_app',
       repository: selectedRepo,
       branch: selectedBranch,
-      timestamp: new Date().toISOString()
+      aligned_crew: activeCrew.name,
+      process_mode: activeCrew.process,
+      langgraph_thread_synced: true
     };
     for (let i = 0; i <= currentStepIndex; i++) {
-      if (flowSteps[i]) {
-        state = { ...state, ...flowSteps[i].outputStateChange };
+      const s = flowSteps[i];
+      if (s) {
+        completedSteps.push(s.title.replace(/\(\)$/, ''));
+        s.graphifyModuleIds.forEach((m) => touchedModules.add(m));
+        state = { ...state, ...s.outputStateChange };
       }
     }
-    
-    // Graphify Alignment: Add derived metadata if synced
-    if (state.graphify_sync_status === 'synced') {
-      state.graphify_context = {
-        primary_layer: 'ui',
-        active_modules: ['CrewStudio', 'LangGraphView', 'FlowVisualizer', 'GraphifyRepo'],
-        dependency_depth: 3
-      };
-    }
-    
+    state.completed_flow_steps = completedSteps;
+    state.graphify_touched_modules = Array.from(touchedModules);
     return state;
-  };
+  }, [selectedRepo, selectedBranch, activeCrew, currentStepIndex, flowSteps]);
 
   const handleStepForward = () => {
     if (currentStepIndex < flowSteps.length - 1) {
       const nextIdx = currentStepIndex + 1;
       setCurrentStepIndex(nextIdx);
       setSelectedStepId(flowSteps[nextIdx].id);
-      setStateHistory((prev) => [...prev, flowSteps[nextIdx].outputStateChange]);
     }
   };
 
   const handleReset = () => {
-    setCurrentStepIndex(-1);
+    setCurrentStepIndex(0);
+    if (flowSteps[0]) setSelectedStepId(flowSteps[0].id);
     setIsPlaying(false);
-    setStateHistory([]);
   };
 
   const handleRunAll = async () => {
@@ -345,132 +336,142 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
     for (let i = 0; i < flowSteps.length; i++) {
       setCurrentStepIndex(i);
       setSelectedStepId(flowSteps[i].id);
-      await new Promise((r) => setTimeout(r, 900));
+      await new Promise((r) => setTimeout(r, 750));
     }
     setIsPlaying(false);
   };
 
-  const flowPythonCode = `from crewai.flow.flow import Flow, start, listen, router
-from pydantic import BaseModel
-
-class AppState(BaseModel):
-    project_name: str = "${selectedRepo.split('/')[1] || 'crewai_app'}"
-    prd_status: str = "pending"
-    architecture_complete: bool = False
-    security_verified: bool = False
-    project_live: bool = False
-
-class FullStackFlow(Flow[AppState]):
-
-    @start()
-    def define_strategy(self):
-        # Alex (Product Lead) generates the PRD
-        print(f"Planning {self.state.project_name}...")
-        self.state.prd_status = "drafted"
-        return "strategy_complete"
-
-    @router(define_strategy)
-    def architect_system(self):
-        # Jordan (Senior Dev) builds the schema
-        self.state.architecture_complete = True
-        return "architecture_verified"
-
-    @listen("architecture_verified")
-    def audit_security(self):
-        # Sam (Security Auditor) verifies the stack
-        self.state.security_verified = True
-        return "audit_passed"
-
-    @listen(audit_security)
-    def release_production(self):
-        # Final production handoff
-        self.state.project_live = True
-        print(f"Project {self.state.project_name} is LIVE!")
-
-flow = FullStackFlow()
-flow.kickoff()`;
+  const flowPythonCode = useMemo(
+    () => generateAlignedFlowPythonCode(activeCrew, flowSteps, selectedRepo),
+    [activeCrew, flowSteps, selectedRepo]
+  );
 
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-10 py-6 space-y-6">
       {/* Visualizer Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-800">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <span className="p-1.5 rounded-lg bg-[#EB6658]/10 text-[#EB6658] border border-[#EB6658]/30">
-              {activeView === 'flow_dag' ? <GitMerge className="w-5 h-5" /> : <GitFork className="w-5 h-5" />}
+              {activeView === 'flow_dag' ? (
+                <GitMerge className="w-5 h-5" />
+              ) : (
+                <GitFork className="w-5 h-5" />
+              )}
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               {activeView === 'flow_dag'
-                ? 'CrewAI Flow Visualizer & State Inspector'
-                : 'Graphify: Whole Repository Architecture Diagram'}
+                ? 'Aligned Event Flow DAG (@start · @listen · @router)'
+                : 'Graphify: Whole Repository Architecture Graph'}
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             {activeView === 'flow_dag'
-              ? 'Event-driven deterministic state machine visualizer featuring @start, @router, and @listen lifecycle nodes with dynamic pan, zoom, and drag.'
-              : 'Interactive codebase knowledge graph & dependency map with dynamic pan, cursor-centered wheel zoom, and draggable modules.'}
+              ? `Dynamically compiled from "${activeCrew.name}" (${activeCrew.tasks.length} tasks + Graphify sync gate) — 100% aligned with Crew Studio Task DAG and LangGraph StateGraph.`
+              : `Interactive codebase knowledge graph mapping all 22 repository modules to their governing CrewAI Specialist, LangGraph Actor node, and Flow Decorator.`}
           </p>
         </div>
 
         {/* View Switcher Buttons */}
         <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs shrink-0">
           <button
-            onClick={() => setActiveView('graphify_repo')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+            onClick={() => switchSubView('graphify_repo')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer whitespace-nowrap ${
               activeView === 'graphify_repo'
                 ? 'bg-[#EB6658] text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <GitFork className="w-3.5 h-3.5" />
-            <span>Graphify Repo Diagram</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-mono">
-              Whole App
-            </span>
+            <span>Graphify Repo Map (22 Modules)</span>
           </button>
 
           <button
-            onClick={() => setActiveView('flow_dag')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+            onClick={() => switchSubView('flow_dag')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer whitespace-nowrap ${
               activeView === 'flow_dag'
                 ? 'bg-[#EB6658] text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <GitMerge className="w-3.5 h-3.5" />
-            <span>Workflow DAG</span>
+            <span>Event Flow DAG ({flowSteps.length} Steps)</span>
           </button>
         </div>
       </div>
 
-      {/* Conditionally Render Graphify View vs Workflow DAG View */}
+      {/* Conditionally Render Graphify View vs Event Flow DAG View */}
       {activeView === 'graphify_repo' ? (
-        <GraphifyRepoVisualizer 
-          onTaskJules={onTaskJules} 
+        <GraphifyRepoVisualizer
+          onTaskJules={onTaskJules}
           selectedRepo={selectedRepo}
           selectedBranch={selectedBranch}
+          focusedModuleId={focusedGraphifyModuleId}
+          onOpenLangGraphNode={(lgNodeId) => onOpenLangGraph?.(lgNodeId)}
+          onOpenFlowStep={(taskId) => {
+            if (taskId) {
+              const targetStep = flowSteps.find((s) => s.taskId === taskId);
+              if (targetStep) {
+                const idx = flowSteps.indexOf(targetStep);
+                setSelectedStepId(targetStep.id);
+                setCurrentStepIndex(idx >= 0 ? idx : 0);
+              }
+            }
+            switchSubView('flow_dag');
+          }}
+          onOpenCrewStudio={onOpenCrewStudio}
         />
       ) : (
         <>
           {/* Flow Controls Bar */}
-          <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex-wrap gap-3">
-            <div className="flex items-center gap-3 text-xs text-slate-300">
-              <span>Graph Lifecycle: <strong className="text-white">{flowSteps.length} Steps</strong></span>
-              <span>Active Step: <strong className="text-[#EB6658]">{currentStepIndex >= 0 ? flowSteps[currentStepIndex].title : 'Not Started'}</strong></span>
+          <div className="flex items-center justify-between bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 flex-wrap gap-3">
+            <div className="flex items-center gap-3 text-xs text-slate-300 flex-wrap">
+              <span>
+                Aligned Crew: <strong className="text-white">{activeCrew.name}</strong>
+              </span>
+              <span aria-hidden="true">·</span>
+              <span className="tabular-nums">
+                Lifecycle: <strong className="text-white">{flowSteps.length} Event Steps</strong>
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                Active Step:{' '}
+                <strong className="text-[#EB6658] font-mono">
+                  {flowSteps[currentStepIndex]?.title || 'Ready'}
+                </strong>
+              </span>
             </div>
 
             <div className="flex items-center gap-2">
+              {onOpenCrewStudio && (
+                <button
+                  onClick={onOpenCrewStudio}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <Layers className="w-3.5 h-3.5 text-[#EB6658]" />
+                  <span>Edit Task DAG</span>
+                </button>
+              )}
+              {onOpenLangGraph && (
+                <button
+                  onClick={() => onOpenLangGraph(selectedStep?.langGraphNodeId)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-sky-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <Network className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Inspect in LangGraph</span>
+                </button>
+              )}
               <button
                 onClick={handleReset}
-                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset State</span>
+                <span>Reset</span>
               </button>
               <button
                 onClick={handleStepForward}
                 disabled={isPlaying || currentStepIndex >= flowSteps.length - 1}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <span>Next Step</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -478,7 +479,7 @@ flow.kickoff()`;
               <button
                 onClick={handleRunAll}
                 disabled={isPlaying}
-                className="px-4 py-1.5 rounded-lg bg-[#EB6658] hover:bg-[#C94C3C] disabled:opacity-40 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                className="px-4 py-1.5 rounded-lg bg-[#EB6658] hover:bg-[#C94C3C] disabled:opacity-40 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
                 <span>{isPlaying ? 'Running Flow...' : 'Auto-Play Flow'}</span>
@@ -493,7 +494,7 @@ flow.kickoff()`;
               ref={dagContainerRef}
               onMouseDown={handleDagCanvasMouseDown}
               onDoubleClick={handleFitDagView}
-              className={`lg:col-span-7 rounded-2xl border border-slate-800 bg-[#070A12] overflow-hidden flex flex-col relative select-none h-[620px] ${
+              className={`lg:col-span-7 rounded-2xl border border-slate-800 bg-[#070A12] overflow-hidden flex flex-col relative select-none h-[660px] ${
                 isPanning ? 'cursor-grabbing' : 'cursor-grab'
               }`}
             >
@@ -510,17 +511,17 @@ flow.kickoff()`;
 
               {/* Top-Left Gesture Hints */}
               <div className="absolute top-3 left-3 z-30 pointer-events-none flex items-center gap-2 flex-wrap">
-                <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 shadow-md backdrop-blur-sm">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5">
                   <Hand className="w-3 h-3 text-[#EB6658]" />
                   <span>Drag to Pan</span>
                 </span>
-                <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 shadow-md backdrop-blur-sm">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 tabular-nums">
                   <Compass className="w-3 h-3 text-sky-400" />
-                  <span>Wheel Zoom ({Math.round(zoom * 100)}%)</span>
+                  <span>Zoom ({Math.round(zoom * 100)}%)</span>
                 </span>
-                <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5 shadow-md backdrop-blur-sm">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-300 border border-slate-800 text-[10px] font-mono flex items-center gap-1.5">
                   <Move className="w-3 h-3 text-emerald-400" />
-                  <span>Drag Lifecycle Nodes</span>
+                  <span>Drag Flow Steps</span>
                 </span>
               </div>
 
@@ -528,7 +529,7 @@ flow.kickoff()`;
               <div
                 onMouseDown={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
-                className="absolute top-3 right-3 z-30 flex items-center gap-1 bg-slate-900/95 border border-slate-800 rounded-xl p-1 shadow-xl backdrop-blur-md"
+                className="absolute top-3 right-3 z-30 flex items-center gap-1 bg-slate-900/95 border border-slate-800 rounded-xl p-1 shadow-xl"
               >
                 <button
                   onClick={() => handleZoomBy(-0.15)}
@@ -540,7 +541,7 @@ flow.kickoff()`;
                 <button
                   onClick={() => setZoom(1)}
                   title="Reset Zoom to 100%"
-                  className="px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-[#EB6658] hover:bg-slate-800 transition min-w-[44px] text-center cursor-pointer"
+                  className="px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-[#EB6658] hover:bg-slate-800 transition min-w-[44px] text-center cursor-pointer tabular-nums"
                 >
                   {Math.round(zoom * 100)}%
                 </button>
@@ -587,8 +588,8 @@ flow.kickoff()`;
                     position: 'absolute',
                     left: 0,
                     top: 0,
-                    width: '1200px',
-                    height: '900px'
+                    width: '1300px',
+                    height: '1050px'
                   }}
                   className={isPanning || draggingStepId ? '' : 'transition-transform duration-75 ease-out'}
                 >
@@ -625,10 +626,10 @@ flow.kickoff()`;
                         if (!target) return null;
 
                         const isEdgePassed = idx <= currentStepIndex;
-                        const sx = step.x + 140;
-                        const sy = step.y + 70;
-                        const tx = target.x + 140;
-                        const ty = target.y + 70;
+                        const sx = step.x + 150;
+                        const sy = step.y + 75;
+                        const tx = target.x + 150;
+                        const ty = target.y + 75;
                         const midY = (sy + ty) / 2;
                         const pathD = `M ${sx} ${sy} C ${sx} ${midY}, ${tx} ${midY}, ${tx} ${ty}`;
 
@@ -666,7 +667,7 @@ flow.kickoff()`;
                           position: 'absolute',
                           left: `${node.x}px`,
                           top: `${node.y}px`,
-                          width: '280px',
+                          width: '305px',
                           cursor: isBeingDragged ? 'grabbing' : 'grab'
                         }}
                         className={`p-3.5 rounded-2xl border select-none ${
@@ -683,9 +684,9 @@ flow.kickoff()`;
                       >
                         <div className="flex items-start gap-2.5">
                           <div
-                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] mt-0.5 shrink-0 ${
+                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] mt-0.5 shrink-0 tabular-nums ${
                               isActive
-                                ? 'bg-[#EB6658] text-white animate-pulse'
+                                ? 'bg-[#EB6658] text-white'
                                 : isPast
                                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                                 : 'bg-slate-800 text-slate-400'
@@ -694,7 +695,7 @@ flow.kickoff()`;
                             {isPast ? <CheckCircle2 className="w-3.5 h-3.5" /> : index + 1}
                           </div>
 
-                          <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex-1 min-w-0 space-y-1.5">
                             <div className="flex items-center justify-between gap-1">
                               <span className="font-mono font-bold text-xs text-white truncate">
                                 {node.title}
@@ -702,18 +703,46 @@ flow.kickoff()`;
                               <Move className="w-3 h-3 text-slate-500 shrink-0" />
                             </div>
 
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-[#EB6658]/15 text-[#EB6658] border border-[#EB6658]/30 font-semibold">
-                                {node.decorator}
-                              </span>
-                              <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                                {node.type}
-                              </span>
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono truncate">
+                              <span className="text-[#EB6658] font-semibold">{node.decorator}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-sky-400">{node.langGraphNodeId}</span>
                             </div>
 
-                            <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">
-                              {node.description}
-                            </p>
+                            <div className="text-[11px] text-slate-200 font-semibold truncate">
+                              {node.agentName} — <span className="text-slate-400 font-normal">{node.agentRole}</span>
+                            </div>
+
+                            {node.controllerAgentName && (
+                              <div className="flex items-center gap-1 text-[10px] text-emerald-400">
+                                <ShieldCheck className="w-3 h-3 shrink-0" />
+                                <span className="truncate">Gate: {node.controllerAgentName}</span>
+                              </div>
+                            )}
+
+                            {/* Linked Graphify Modules */}
+                            <div className="pt-1 border-t border-slate-800/80 flex items-center gap-1 flex-wrap">
+                              {node.graphifyModuleIds.slice(0, 3).map((modId) => (
+                                <button
+                                  key={modId}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFocusedGraphifyModuleId(modId);
+                                    switchSubView('graphify_repo');
+                                  }}
+                                  className="text-[9px] font-mono text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded px-1.5 py-0.5 transition cursor-pointer"
+                                  title="Click to inspect this module in Graphify Repo Diagram"
+                                >
+                                  {modId}
+                                </button>
+                              ))}
+                              {node.graphifyModuleIds.length > 3 && (
+                                <span className="text-[9px] font-mono text-slate-500">
+                                  +{node.graphifyModuleIds.length - 3}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -724,32 +753,77 @@ flow.kickoff()`;
             </div>
 
             {/* State Inspector & Python Script (5 cols) */}
-            <div className="lg:col-span-5 space-y-6">
+            <div className="lg:col-span-5 space-y-5">
+              {/* Selected Step & Graphify Alignment Inspector */}
+              {selectedStep && (
+                <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3 text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <div>
+                      <span className="text-[10px] font-mono text-[#EB6658] uppercase font-bold">
+                        {selectedStep.phase}
+                      </span>
+                      <h3 className="text-sm font-bold text-white font-mono">
+                        {selectedStep.title}
+                      </h3>
+                    </div>
+                    <span className="font-mono text-[11px] text-sky-400">
+                      {selectedStep.decorator}
+                    </span>
+                  </div>
+
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    {selectedStep.description}
+                  </p>
+
+                  <div>
+                    <span className="text-[11px] text-slate-400 font-semibold block mb-1.5">
+                      Aligned Graphify Repository Modules ({selectedStep.graphifyModuleIds.length}):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedStep.graphifyModuleIds.map((modId) => (
+                        <button
+                          key={modId}
+                          type="button"
+                          onClick={() => {
+                            setFocusedGraphifyModuleId(modId);
+                            switchSubView('graphify_repo');
+                          }}
+                          className="font-mono text-[11px] text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1"
+                        >
+                          <GitFork className="w-3 h-3" />
+                          <span>{modId}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Pydantic State Inspector */}
-              <div className="p-5 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
+              <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Database className="w-4 h-4 text-[#EB6658]" />
-                    <h3 className="text-sm font-bold text-white">Flow State (Durable Store)</h3>
+                    <h3 className="text-sm font-bold text-white">Aligned Flow State (Pydantic Store)</h3>
                   </div>
-                  <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                    Pydantic Serializable
+                  <span className="text-[11px] font-mono text-emerald-400">
+                    Synced with LangGraph
                   </span>
                 </div>
 
                 <div className="rounded-xl border border-slate-800 bg-[#080C14] p-3 overflow-hidden">
-                  <pre className="text-[11px] font-mono text-slate-200 h-60 overflow-y-auto leading-relaxed">
-                    <code>{JSON.stringify(currentMergedState(), null, 2)}</code>
+                  <pre className="text-[11px] font-mono text-slate-200 h-48 overflow-y-auto leading-relaxed">
+                    <code>{JSON.stringify(currentMergedState, null, 2)}</code>
                   </pre>
                 </div>
               </div>
 
               {/* Flow Code */}
-              <div className="p-5 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
+              <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Terminal className="w-4 h-4 text-[#EB6658]" />
-                    <h3 className="text-sm font-bold text-white">Flow Python Implementation</h3>
+                    <h3 className="text-sm font-bold text-white">Aligned Flow Python Implementation</h3>
                   </div>
                   <button
                     onClick={() => {
@@ -774,7 +848,7 @@ flow.kickoff()`;
                 </div>
 
                 <div className="rounded-xl border border-slate-800 bg-[#080C14] p-3 overflow-hidden">
-                  <pre className="text-[11px] font-mono text-slate-300 h-60 overflow-y-auto leading-relaxed">
+                  <pre className="text-[11px] font-mono text-slate-300 h-52 overflow-y-auto leading-relaxed">
                     <code>{flowPythonCode}</code>
                   </pre>
                 </div>
