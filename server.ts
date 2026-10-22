@@ -736,11 +736,16 @@ function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: st
   const rootAllowlist = [
     'package.json',
     'tsconfig.json',
+    'tsconfig.app.json',
+    'tsconfig.node.json',
     'vite.config.ts',
     'index.html',
     'metadata.json',
     '.env.example',
     'server.ts',
+    'start.bat',
+    'run.bat',
+    'run.sh',
     'README.md'
   ];
 
@@ -800,6 +805,17 @@ function collectWorkspaceAppFiles(extraFiles?: Array<{ path: string; content: st
 
   return result;
 }
+
+// Download Standalone Windows Launcher (start.bat)
+app.get('/api/standalone/bat', (req, res) => {
+  const batPath = path.join(process.cwd(), 'start.bat');
+  if (fs.existsSync(batPath)) {
+    res.setHeader('Content-Type', 'application/x-bat; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="start.bat"');
+    return res.send(fs.readFileSync(batPath, 'utf-8'));
+  }
+  return res.status(404).json({ error: 'start.bat not found' });
+});
 
 // Atomic Full-App Push to GitHub via PAT (Git Trees & Commits API)
 app.post('/api/github/push-app', async (req, res) => {

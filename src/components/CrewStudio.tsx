@@ -2862,6 +2862,17 @@ if __name__ == "__main__":
             <span className="hidden sm:inline">Export JSON</span>
           </button>
 
+          {/* Download Standalone Windows .BAT Launcher */}
+          <a
+            href="/api/standalone/bat"
+            download="start.bat"
+            title="Download updated start.bat to launch CrewAI Studio as a standalone Windows desktop app"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-medium transition shadow-sm"
+          >
+            <Laptop className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Standalone .BAT</span>
+          </a>
+
           {/* Execution History Button */}
           <button
             onClick={() => setIsHistoryOpen(true)}
