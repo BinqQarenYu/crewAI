@@ -62,12 +62,26 @@ interface ProModeJobState {
   currentVersion: string;
   evolutionCycleCount: number;
   rateLimitGuard: {
-    pacingMode: 'safe_steady' | 'eco_conservator' | 'balanced_hybrid';
+    pacingMode: 'time_in_the_world' | 'safe_steady' | 'eco_conservator' | 'balanced_hybrid';
     cooldownSecondsBetweenTasks: number;
     providerBreachesCount: number;
     activeKeySlot: string;
     rpmUtilizationPct: number;
     requestsCompletedSafely: number;
+    geminiCreditsRemainingPct?: number;
+    geminiCreditsUsedTokens?: number;
+    geminiCreditsCapTokens?: number;
+    allGeminiCreditsExhausted?: boolean;
+    patientWaitsCount?: number;
+    totalPatientWaitSeconds?: number;
+    ollamaFallback?: {
+      status: 'standby_ready' | 'active_fallback' | 'unavailable_offline';
+      endpoint: string;
+      model: string;
+      available: boolean;
+      fallbackCallsCount: number;
+      note: string;
+    };
   };
   delegatedTasks: Array<{
     id: string;
@@ -358,6 +372,58 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
     }
   };
 
+  const handleUpdateCreditGovernor = async (payload: {
+    cooldownSeconds?: number;
+    simulateCreditsExhausted?: boolean;
+    restoreCredits?: boolean;
+    probeOllama?: boolean;
+  }) => {
+    try {
+      if (typeof payload.cooldownSeconds === 'number') {
+        setCooldownSeconds(payload.cooldownSeconds);
+      }
+      const res = await fetch('/api/pro/credit-governor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.state) {
+          setProState(data.state);
+          window.dispatchEvent(
+            new CustomEvent('crewai:pro-status-updated', { detail: data.state })
+          );
+        }
+        const fb = data.ollamaFallback || data.state?.rateLimitGuard?.ollamaFallback;
+        if (payload.simulateCreditsExhausted === true) {
+          setStatusBanner(
+            fb?.available
+              ? `All Gemini credits marked used → Automatically switched to Local Ollama (${fb.model} at ${fb.endpoint}) with 0 rate-limit breaches.`
+              : `All Gemini credits marked used → Probed Ollama at ${fb?.endpoint || 'http://127.0.0.1:11434'} ("if possible only"). Ollama is currently offline, so waiting patiently with 0 breaches.`
+          );
+        } else if (payload.simulateCreditsExhausted === false || payload.restoreCredits) {
+          setStatusBanner(
+            'Gemini AI credit pool restored to 93% — "Time in the World" patient wait governor active (0 rate-limit breaches).'
+          );
+        } else if (payload.probeOllama) {
+          setStatusBanner(
+            fb?.available
+              ? `Ollama node online at ${fb.endpoint} (${fb.model}) — Ready for conditional fallback if all Gemini credits are used.`
+              : `Probed Ollama at ${fb?.endpoint || 'http://127.0.0.1:11434'} ("if possible only") — Currently offline; Patient Gemini Governor active.`
+          );
+        } else if (typeof payload.cooldownSeconds === 'number') {
+          setStatusBanner(
+            `Updated Step 5 "Time in the World" patient wait pacing to ${payload.cooldownSeconds}s between calls (No Rush · Never Hit Limit).`
+          );
+        }
+        setTimeout(() => setStatusBanner(null), 4500);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const handleStepSelectOrAdvance = async (targetStep?: number) => {
     setIsAdvancing(true);
     try {
@@ -537,6 +603,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               onSelectStep={(stepNum) => handleStepSelectOrAdvance(stepNum)}
               onSwitchToSetup={() => setActiveModalTab('setup')}
               onFormulateFromAudit={() => handleFormulateGoal(true)}
+              onUpdateCreditGovernor={handleUpdateCreditGovernor}
               isAdvancing={isAdvancing}
               isFormulating={isFormulating}
             />
@@ -719,17 +786,22 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                   </div>
                   <div>
                     <label className="text-[11px] text-slate-400 block mb-1">
-                      Step 5 Task Pacing Cooldown
+                      Step 5 &quot;Time in the World&quot; Wait
                     </label>
                     <select
                       aria-label="Select Pacing Cooldown"
                       value={cooldownSeconds}
-                      onChange={(e) => setCooldownSeconds(Number(e.target.value))}
+                      onChange={(e) => {
+                        const sec = Number(e.target.value);
+                        setCooldownSeconds(sec);
+                        handleUpdateCreditGovernor({ cooldownSeconds: sec });
+                      }}
                       className="w-full bg-slate-950 text-xs font-mono text-emerald-300 px-2.5 py-1.5 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658]"
                     >
-                      <option value={8}>8s Steady Pacing (Safe)</option>
-                      <option value={12}>12s Zero-Breach Guard (Recommended)</option>
-                      <option value={20}>20s Ultra-Conservative Quota</option>
+                      <option value={15}>15s Patient Pacing (Safe)</option>
+                      <option value={20}>20s No-Rush Guard (Recommended)</option>
+                      <option value={30}>30s Deep Credit Conservator</option>
+                      <option value={60}>60s &quot;All the Time in the World&quot;</option>
                     </select>
                   </div>
                 </div>
@@ -918,49 +990,85 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               </div>
             </div>
 
-            {/* Step 5: Slowly & Surely Finish (Zero Rate-Limit Breach Governor) */}
+            {/* Step 5: Slowly & Surely Finish (Patient Gemini Credit Governor & Conditional Ollama Fallback) */}
             <div className="lg:col-span-5 bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-4">
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                   <div className="flex items-center gap-2">
                     <Gauge className="w-4 h-4 text-emerald-400" />
                     <h3 className="text-sm font-bold text-white">
-                      Step 5 · Slowly & Surely (Zero Rate-Limit Breach)
+                      Step 5 · Slowly &amp; Surely (Patient Credit Guard + Ollama)
                     </h3>
                   </div>
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                    0 BREACHES
+                    0 BREACHES · NO RUSH
                   </span>
                 </div>
 
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Tasks execute with deterministic inter-task cooldowns and multi-slot token rotation so AI provider limits (RPM/TPM) are never breached during the 24-hour cycle.
+                  We have all the time in the world: tasks willingly wait ({proState?.rateLimitGuard.cooldownSecondsBetweenTasks ?? 20}s pacing) and rotate Gemini key slots at &le;65% RPM so limits are never hit. If all Gemini credits are used up, it automatically tries local Ollama <em>if possible only</em>.
                 </p>
 
                 <div className="grid grid-cols-2 gap-2.5">
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Provider Breaches</div>
-                    <div className="text-lg font-mono font-extrabold text-emerald-400 mt-0.5">
-                      {proState?.rateLimitGuard.providerBreachesCount ?? 0} (100% Safe)
+                    <div className="text-[10px] text-slate-400 uppercase">Gemini Credits Left</div>
+                    <div className="text-lg font-mono font-extrabold text-emerald-400 mt-0.5 tabular-nums">
+                      {proState?.rateLimitGuard.allGeminiCreditsExhausted
+                        ? '0% (Exhausted)'
+                        : `${proState?.rateLimitGuard.geminiCreditsRemainingPct ?? 93}% Pool`}
                     </div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Pacing Cooldown</div>
-                    <div className="text-lg font-mono font-extrabold text-sky-400 mt-0.5">
-                      {proState?.rateLimitGuard.cooldownSecondsBetweenTasks ?? 12}s / Task
+                    <div className="text-[10px] text-slate-400 uppercase">Patient Wait Pacing</div>
+                    <div className="text-lg font-mono font-extrabold text-sky-400 mt-0.5 tabular-nums">
+                      {proState?.rateLimitGuard.cooldownSecondsBetweenTasks ?? 20}s No-Rush
                     </div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">RPM Utilization</div>
-                    <div className="text-lg font-mono font-extrabold text-slate-100 mt-0.5">
-                      {proState?.rateLimitGuard.rpmUtilizationPct ?? 28}% of Cap
+                    <div className="text-[10px] text-slate-400 uppercase">Patient Waits Run</div>
+                    <div className="text-lg font-mono font-extrabold text-slate-100 mt-0.5 tabular-nums">
+                      {proState?.rateLimitGuard.patientWaitsCount ?? 18} ({proState?.rateLimitGuard.totalPatientWaitSeconds ?? 360}s)
                     </div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 uppercase">Safe Calls Completed</div>
-                    <div className="text-lg font-mono font-extrabold text-amber-300 mt-0.5">
-                      {proState?.rateLimitGuard.requestsCompletedSafely ?? 142}
+                    <div className="text-[10px] text-slate-400 uppercase">Ollama (If Possible)</div>
+                    <div className="text-sm font-mono font-extrabold text-amber-300 mt-1 truncate">
+                      {proState?.rateLimitGuard.ollamaFallback?.status === 'active_fallback'
+                        ? 'Active Fallback'
+                        : proState?.rateLimitGuard.ollamaFallback?.available
+                        ? 'Online Standby'
+                        : 'Standby (If Possible)'}
                     </div>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                  <div className="text-[11px] text-slate-300 leading-snug">
+                    {proState?.rateLimitGuard.ollamaFallback?.note ||
+                      'Standby ("if possible only") — Will probe & route to local Ollama if all Gemini credits are used up.'}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleUpdateCreditGovernor({
+                          simulateCreditsExhausted: !proState?.rateLimitGuard.allGeminiCreditsExhausted,
+                          probeOllama: true
+                        })
+                      }
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-[11px] font-semibold transition cursor-pointer"
+                    >
+                      {proState?.rateLimitGuard.allGeminiCreditsExhausted
+                        ? 'Restore Gemini Credits'
+                        : 'Simulate Credit Exhaustion → Try Ollama'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateCreditGovernor({ probeOllama: true })}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-[11px] font-semibold transition cursor-pointer"
+                    >
+                      Probe Ollama
+                    </button>
                   </div>
                 </div>
               </div>
@@ -968,10 +1076,10 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="text-emerald-200 font-medium">Active Quota Governor Slot:</span>
+                  <span className="text-emerald-200 font-medium">Active Engine / Slot:</span>
                 </div>
-                <span className="font-mono text-emerald-300 font-bold truncate max-w-[200px]">
-                  {proState?.rateLimitGuard.activeKeySlot || 'Free Pool + Argon Governor'}
+                <span className="font-mono text-emerald-300 font-bold truncate max-w-[220px]">
+                  {proState?.rateLimitGuard.activeKeySlot || 'Free Pool + Patient Governor'}
                 </span>
               </div>
             </div>

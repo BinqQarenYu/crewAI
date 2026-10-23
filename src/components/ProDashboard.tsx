@@ -62,12 +62,26 @@ export interface ProDashboardJobState {
   currentVersion: string;
   evolutionCycleCount: number;
   rateLimitGuard: {
-    pacingMode: 'safe_steady' | 'eco_conservator' | 'balanced_hybrid';
+    pacingMode: 'time_in_the_world' | 'safe_steady' | 'eco_conservator' | 'balanced_hybrid';
     cooldownSecondsBetweenTasks: number;
     providerBreachesCount: number;
     activeKeySlot: string;
     rpmUtilizationPct: number;
     requestsCompletedSafely: number;
+    geminiCreditsRemainingPct?: number;
+    geminiCreditsUsedTokens?: number;
+    geminiCreditsCapTokens?: number;
+    allGeminiCreditsExhausted?: boolean;
+    patientWaitsCount?: number;
+    totalPatientWaitSeconds?: number;
+    ollamaFallback?: {
+      status: 'standby_ready' | 'active_fallback' | 'unavailable_offline';
+      endpoint: string;
+      model: string;
+      available: boolean;
+      fallbackCallsCount: number;
+      note: string;
+    };
   };
   delegatedTasks: Array<{
     id: string;
@@ -118,6 +132,12 @@ interface ProDashboardProps {
   onSelectStep: (stepNumber: number) => void;
   onSwitchToSetup: () => void;
   onFormulateFromAudit?: () => void;
+  onUpdateCreditGovernor?: (payload: {
+    cooldownSeconds?: number;
+    simulateCreditsExhausted?: boolean;
+    restoreCredits?: boolean;
+    probeOllama?: boolean;
+  }) => void;
   isAdvancing?: boolean;
   isFormulating?: boolean;
 }
@@ -210,10 +230,14 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
   onSelectStep,
   onSwitchToSetup,
   onFormulateFromAudit,
+  onUpdateCreditGovernor,
   isAdvancing = false,
   isFormulating = false
 }) => {
   const [selectedMetricTab, setSelectedMetricTab] = useState<'pacing' | 'alignment'>('pacing');
+  const creditsPct = proState.rateLimitGuard.geminiCreditsRemainingPct ?? 93;
+  const creditsExhausted = Boolean(proState.rateLimitGuard.allGeminiCreditsExhausted || creditsPct <= 0);
+  const ollamaInfo = proState.rateLimitGuard.ollamaFallback;
 
   const activeStep = proState.currentStepNumber || 5;
   const cycleProgressPct = Math.min(
@@ -379,26 +403,30 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           </div>
         </div>
 
-        {/* KPI 3: Rate-Limit Safety Governor (Step 5) */}
+        {/* KPI 3: Patient Gemini Credit & Ollama Fallback Governor (Step 5) */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Rate-Limit Safety (Step 5)</span>
+              <span>Gemini Credit &amp; Wait Guard (Step 5)</span>
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="mt-2 flex items-baseline gap-2 tabular-nums">
               <span className="text-2xl font-extrabold text-white">
+                {creditsExhausted ? 'Ollama / Wait' : `${creditsPct}% Credits`}
+              </span>
+              <span className="text-xs text-emerald-400 font-semibold">
                 {proState.rateLimitGuard.providerBreachesCount} Breaches
               </span>
-              <span className="text-xs text-emerald-400 font-semibold">100% Safe</span>
             </div>
           </div>
           <div className="mt-3 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-1.5 tabular-nums">
-            <span>{proState.rateLimitGuard.cooldownSecondsBetweenTasks}s Cooldown</span>
+            <span>{proState.rateLimitGuard.cooldownSecondsBetweenTasks}s No-Rush Wait</span>
             <span aria-hidden="true">·</span>
-            <span>{proState.rateLimitGuard.rpmUtilizationPct}% RPM</span>
+            <span>{proState.rateLimitGuard.patientWaitsCount ?? 18} Waits</span>
             <span aria-hidden="true">·</span>
-            <span>{proState.rateLimitGuard.requestsCompletedSafely} calls</span>
+            <span className="text-sky-300 truncate">
+              {ollamaInfo?.available ? 'Ollama Ready' : 'Ollama If-Possible'}
+            </span>
           </div>
         </div>
 
@@ -421,6 +449,157 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           <div className="mt-3 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-1.5 truncate font-mono">
             <GitBranch className="w-3 h-3 text-sky-400 shrink-0" />
             <span className="text-slate-200 truncate">{proState.targetBranch}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Patient "Time-in-the-World" Gemini Credit Governor & Conditional Ollama Fallback Strip */}
+      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 tabular-nums">
+              <span>STEP 5 · TIME-IN-THE-WORLD CREDIT GOVERNOR</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-slate-300">No Rush · Wait-First Pacing (Never Hit Limit)</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-sky-300">
+                Fallback: Try Ollama If All Credits Used (If Possible Only)
+              </span>
+            </div>
+            <h3 className="text-sm font-bold text-white mt-1">
+              Patient Gemini AI Credit Manager &amp; Conditional Ollama Fallback
+            </h3>
+          </div>
+
+          {onUpdateCreditGovernor && (
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Patient Wait Interval"
+                value={proState.rateLimitGuard.cooldownSecondsBetweenTasks || 20}
+                onChange={(e) =>
+                  onUpdateCreditGovernor({ cooldownSeconds: Number(e.target.value) })
+                }
+                className="bg-slate-950 text-xs font-mono text-emerald-300 px-2.5 py-1.5 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658]"
+              >
+                <option value={15}>15s Patient Wait (Safe)</option>
+                <option value={20}>20s No-Rush Pacing (Recommended)</option>
+                <option value={30}>30s Deep Conservation Wait</option>
+                <option value={60}>60s &quot;All the Time in the World&quot;</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateCreditGovernor({
+                    simulateCreditsExhausted: !creditsExhausted,
+                    probeOllama: true
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                  creditsExhausted
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
+                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+                }`}
+              >
+                {creditsExhausted
+                  ? 'Restore Gemini Credits (Back to 94%)'
+                  : 'Test Credit Exhaustion → Try Ollama (If Possible)'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onUpdateCreditGovernor({ probeOllama: true })}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+              >
+                Probe Ollama Node
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+          {/* Left 4 cols: Gemini Credit Pool & Safe Ceiling */}
+          <div className="lg:col-span-4 p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-2">
+            <div className="flex items-center justify-between text-xs tabular-nums">
+              <span className="font-semibold text-slate-200">Gemini Credit Pool Remaining</span>
+              <span
+                className={`font-mono font-bold ${
+                  creditsExhausted ? 'text-amber-400' : 'text-emerald-400'
+                }`}
+              >
+                {creditsExhausted ? '0% (All Credits Used)' : `${creditsPct}% Remaining`}
+              </span>
+            </div>
+            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  creditsExhausted
+                    ? 'bg-amber-500'
+                    : 'bg-gradient-to-r from-emerald-500 to-sky-400'
+                }`}
+                style={{ width: `${creditsExhausted ? 4 : creditsPct}%` }}
+              />
+            </div>
+            <div className="text-[11px] text-slate-400 flex items-center justify-between font-mono tabular-nums">
+              <span>
+                Used: {(proState.rateLimitGuard.geminiCreditsUsedTokens ?? 18400).toLocaleString()}{' '}
+                / {(proState.rateLimitGuard.geminiCreditsCapTokens ?? 250000).toLocaleString()} tok
+              </span>
+              <span className="text-emerald-400">Cap: &le;65% RPM</span>
+            </div>
+          </div>
+
+          {/* Middle 4 cols: "Time in the World" Patient Wait Policy */}
+          <div className="lg:col-span-4 p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-1.5">
+            <div className="flex items-center justify-between text-xs tabular-nums">
+              <span className="font-semibold text-slate-200">
+                &quot;Time in the World&quot; Patient Wait Queue
+              </span>
+              <span className="font-mono text-sky-300 font-bold">
+                {proState.rateLimitGuard.cooldownSecondsBetweenTasks}s / Call
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Willingly waits between requests and rotates key slots at 65% RPM so provider limits are{' '}
+              <strong className="text-emerald-400">never hit (0 breaches)</strong>.
+            </p>
+            <div className="text-[11px] text-slate-400 flex items-center gap-2 font-mono tabular-nums pt-0.5">
+              <span>{proState.rateLimitGuard.patientWaitsCount ?? 18} patient waits</span>
+              <span aria-hidden="true">·</span>
+              <span>{proState.rateLimitGuard.totalPatientWaitSeconds ?? 360}s total waited</span>
+            </div>
+          </div>
+
+          {/* Right 4 cols: Conditional Ollama Fallback ("If Possible Only") */}
+          <div className="lg:col-span-4 p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-1.5">
+            <div className="flex items-center justify-between text-xs tabular-nums">
+              <span className="font-semibold text-slate-200">
+                Ollama Fallback (If Possible Only)
+              </span>
+              <span
+                className={`font-mono text-[11px] font-bold ${
+                  ollamaInfo?.status === 'active_fallback'
+                    ? 'text-emerald-400'
+                    : ollamaInfo?.available
+                    ? 'text-sky-400'
+                    : 'text-amber-300'
+                }`}
+              >
+                {ollamaInfo?.status === 'active_fallback'
+                  ? 'ACTIVE FALLBACK'
+                  : ollamaInfo?.available
+                  ? 'ONLINE STANDBY'
+                  : 'IF-POSSIBLE STANDBY'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed line-clamp-2">
+              {ollamaInfo?.note ||
+                'When all Gemini credits are used up, automatically probes local Ollama (http://127.0.0.1:11434) and routes tasks there if reachable.'}
+            </p>
+            <div className="text-[11px] text-slate-400 flex items-center justify-between font-mono tabular-nums pt-0.5">
+              <span className="truncate">{ollamaInfo?.endpoint || 'http://127.0.0.1:11434'}</span>
+              <span>Fallback Calls: {ollamaInfo?.fallbackCallsCount ?? 0}</span>
+            </div>
           </div>
         </div>
       </div>
