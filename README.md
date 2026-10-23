@@ -61,6 +61,10 @@ npm run dev
 npm run build
 ```
 
+
+## Architecture
+For a detailed look at the autonomous pipeline and Jules integration, see [Architecture & Jules Lifecycle](/.aistudio/artifacts/brain/5695ea9b-9941-4cad-8737-20fff04f28b1/ARCHITECTURE_AND_WORKFLOW.md).
+
 ## Tech Stack
 - **Framework**: React 19 + TypeScript
 - **Bundler**: Vite

@@ -1075,6 +1075,38 @@ app.get('/api/standalone/bat', (req, res) => {
   }
 });
 
+// Suggest AI improvement for task descriptions
+app.post('/api/ai/suggest-task', async (req, res) => {
+  const { description } = req.body;
+  if (!description) {
+    return res.status(400).json({ error: 'Missing description' });
+  }
+
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Improve the following task description for a multi-agent AI system. Make it more specific, actionable, and result-oriented, following best practices for CrewAI tasks. Only return the improved description, nothing else.\n\nDescription: "${description}"` }] }]
+        })
+      }
+    );
+
+    const data: any = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || 'Failed to suggest improvement');
+
+    const improvedDescription = data.candidates[0].content.parts[0].text;
+    res.json({ improvedDescription });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to suggest improvement' });
+  }
+});
+
 // Atomic Full-App Push to GitHub via PAT (Git Trees & Commits API)
 app.post('/api/github/push-app', async (req, res) => {
   syncStandaloneBatFilesOnDisk();

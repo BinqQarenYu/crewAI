@@ -46,6 +46,7 @@ import {
 import { GmailWorkspacePanel } from './GmailWorkspacePanel';
 import { AutonomyStrategyDashboard } from './AutonomyStrategyDashboard';
 import { StructuredAuditLogPanel } from './StructuredAuditLogPanel';
+import { AgentAuditLog } from './AgentAuditLog';
 import { AutonomousPRReviewModule } from './AutonomousPRReviewModule';
 import { PredictiveSchedulerModule } from './PredictiveSchedulerModule';
 import { PredictiveInsightsDashboard } from './PredictiveInsightsDashboard';
@@ -807,7 +808,30 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
   const [isGuideMode, setIsGuideMode] = useState<boolean>(true);
   const [guideStep, setGuideStep] = useState<SpoonFeedStep>(1);
   const [isPushingPat, setIsPushingPat] = useState<boolean>(false);
+  const [suggestingTaskId, setSuggestingTaskId] = useState<string | null>(null);
   const pendingPushAfterEnvRef = useRef<boolean>(false);
+
+  const suggestImprovement = async (task: TaskConfig) => {
+    setSuggestingTaskId(task.id);
+    try {
+      const res = await fetch('/api/ai/suggest-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: task.description })
+      });
+      const data = await res.json();
+      if (data.improvedDescription) {
+        setCrew(c => ({
+          ...c,
+          tasks: c.tasks.map(t => t.id === task.id ? { ...t, description: data.improvedDescription.trim() } : t)
+        }));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSuggestingTaskId(null);
+    }
+  };
 
   const handleSelectGuideStep = useCallback((step: SpoonFeedStep) => {
     setIsGuideMode(true);
@@ -4714,9 +4738,19 @@ if __name__ == "__main__":
 
                     <div className="space-y-1.5">
                       <div>
-                        <span className="text-[10px] font-mono text-slate-400 block mb-0.5">
-                          Task Execution Instructions:
-                        </span>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px] font-mono text-slate-400">
+                            Task Execution Instructions:
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => suggestImprovement(task)}
+                            disabled={suggestingTaskId === task.id}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold underline cursor-pointer"
+                          >
+                            {suggestingTaskId === task.id ? 'Suggesting...' : 'AI-Suggested Improvement'}
+                          </button>
+                        </div>
                         <input
                           type="text"
                           value={task.description}
@@ -4815,6 +4849,12 @@ if __name__ == "__main__":
                   : ''
               }`}
             >
+              <AgentAuditLog
+                agents={crew.agents}
+                tasks={crew.tasks}
+                logs={logs}
+                taskExecutions={taskExecutions}
+              />
               <StructuredAuditLogPanel
                 logs={logs}
                 agents={crew.agents}
