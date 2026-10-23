@@ -27,6 +27,15 @@ import {
 import { CURATED_TARGET_REPOS } from '../utils/repoWorkforceMapping';
 import { ProDashboard } from './ProDashboard';
 
+interface ProModeAuditFinding {
+  id: string;
+  category: 'fatal_flaw' | 'wrong_assumption' | 'false_logic' | 'runtime_error';
+  title: string;
+  flawAnalysis: string;
+  recommendedFix: string;
+  status: 'resolved_in_goal' | 'queued_for_next_goal' | 'verified';
+}
+
 interface ProModeJobState {
   jobId: string;
   isActive: boolean;
@@ -37,7 +46,15 @@ interface ProModeJobState {
   branchPolicy: 'jules_autonomous_branch' | 'direct_main';
   maxHealAttempts: number;
   consecutiveFailures: number;
+  immutableConstitution?: {
+    locked: true;
+    version: string;
+    coreIdentity: string;
+    nonNegotiableInvariants: string[];
+    lastVerifiedAt: string;
+  };
   primaryGoal: string;
+  lastGoalSource?: 'audit_recommendations' | 'user_custom' | 'continuous_cycle_promotion';
   currentStepNumber: number;
   cycleHoursElapsed: number;
   cycleTotalHours: number;
@@ -58,9 +75,11 @@ interface ProModeJobState {
     title: string;
     assignedCrewRole: string;
     agentName: string;
+    constitutionGuard?: string;
     status: 'completed' | 'running' | 'healing' | 'queued';
     progressPct: number;
   }>;
+  auditFindings?: ProModeAuditFinding[];
   errorAndFixLedger: Array<{
     id: string;
     timestamp: string;
@@ -154,8 +173,14 @@ const NINE_STEPS = [
   },
   {
     num: 9,
+    short: 'Push & Update Repo',
+    title: '9. Push & Update Repo',
+    desc: 'Auto-upload & push workspace via saved PAT'
+  },
+  {
+    num: 10,
     short: 'End-But-Not-End',
-    title: '9. End-But-Not-End (Versioning)',
+    title: '10. End-But-Not-End (Versioning)',
     desc: 'Ship semantic version & evolve continuously'
   }
 ];
@@ -217,6 +242,10 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         if (res.ok) {
           const data: ProModeJobState = await res.json();
           setProState(data);
+          window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data }));
+          if (data.currentStepNumber === 9) {
+            window.dispatchEvent(new CustomEvent('crewai:push-entire-app'));
+          }
         }
       } catch {
         // ignore
@@ -249,7 +278,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
     }
   };
 
-  const handleFormulateGoal = async () => {
+  const handleFormulateGoal = async (fromAuditRecommendations = false) => {
     setIsFormulating(true);
     try {
       const res = await fetch('/api/pro/formulate-goal', {
@@ -257,7 +286,8 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawGoal: goalInput,
-          selectedRepo: repoInput
+          selectedRepo: repoInput,
+          fromAuditRecommendations
         })
       });
       if (res.ok) {
@@ -267,9 +297,15 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         }
         if (data.state) {
           setProState(data.state);
+          window.dispatchEvent(
+            new CustomEvent('crewai:pro-status-updated', { detail: data.state })
+          );
         }
-        setStatusBanner('Step 3: AI Architect formulated a 24-hour goal & sprint plan.');
-        setTimeout(() => setStatusBanner(null), 3500);
+        const taskCount = data.tasksCreatedCount || data.state?.delegatedTasks?.length || 5;
+        setStatusBanner(
+          `Step 3 → Step 4: Formulated new goal under the Immutable App Constitution and dynamically created ${taskCount} new CrewAI tasks to proceed.`
+        );
+        setTimeout(() => setStatusBanner(null), 4500);
       }
     } finally {
       setIsFormulating(false);
@@ -337,9 +373,15 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         if (data.currentStepNumber === 9) {
           window.dispatchEvent(new CustomEvent('crewai:push-entire-app'));
           setStatusBanner(
-            `Step 9 Version ${data.currentVersion} promoted — auto-pushing release to GitHub using saved PAT.`
+            `Step 9 (Push & Update Repo): Auto-uploading & pushing verified workspace to ${data.selectedRepo} (${data.targetBranch}) using your saved GitHub PAT.`
           );
-          setTimeout(() => setStatusBanner(null), 4000);
+          setTimeout(() => setStatusBanner(null), 4500);
+        } else if (data.currentStepNumber === 10) {
+          window.dispatchEvent(new CustomEvent('crewai:push-entire-app'));
+          setStatusBanner(
+            `Step 10 (End-But-Not-End): Version ${data.currentVersion} promoted — rolling into Evolution Cycle #${data.evolutionCycleCount} and syncing to GitHub.`
+          );
+          setTimeout(() => setStatusBanner(null), 4500);
         }
       }
     } finally {
@@ -375,11 +417,11 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                       : 'bg-sky-500/15 text-sky-300 border-sky-500/30'
                   }`}
                 >
-                  {proState?.isPaused ? 'PAUSED (HITL OVERRIDE)' : `STEP ${activeStep}/9 ACTIVE`}
+                  {proState?.isPaused ? 'PAUSED (HITL OVERRIDE)' : `STEP ${activeStep}/10 ACTIVE`}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Connect GitHub → Select Project → Formulate 24h Goal → Delegate to Crews → Slowly & Surely Finish → Self-Heal (6/6.1) → Look Forward & Backward → Continuous Versioning
+                Connect GitHub → Select Project → Formulate 24h Goal → Delegate to Crews → Slowly & Surely Finish → Self-Heal (6/6.1) → Look Forward & Backward → Push & Update Repo (9) → End-But-Not-End (10)
               </p>
             </div>
           </div>
@@ -408,7 +450,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                 }`}
               >
                 <Sliders className="w-3.5 h-3.5" />
-                <span>9-Step Setup & Controls</span>
+                <span>10-Step Setup & Controls</span>
               </button>
             </div>
 
@@ -420,7 +462,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                   : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
               }`}
-              title="Automatically cycle through the 9 autonomous steps every 4.5s"
+              title="Automatically cycle through the 10 autonomous steps every 4.5s"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${autoCycleDemo ? 'animate-spin' : ''}`} />
               <span>{autoCycleDemo ? 'Live Auto-Step: ON' : 'Live Auto-Step: OFF'}</span>
@@ -431,7 +473,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               onClick={() => handleStepSelectOrAdvance()}
               disabled={isAdvancing}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-semibold transition cursor-pointer"
-              title="Advance to the next step in the 9-step autonomous cycle"
+              title="Advance to the next step in the 10-step autonomous cycle"
             >
               <FastForward className="w-3.5 h-3.5 text-[#EB6658]" />
               <span>Next Phase</span>
@@ -494,16 +536,18 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               proState={proState}
               onSelectStep={(stepNum) => handleStepSelectOrAdvance(stepNum)}
               onSwitchToSetup={() => setActiveModalTab('setup')}
+              onFormulateFromAudit={() => handleFormulateGoal(true)}
               isAdvancing={isAdvancing}
+              isFormulating={isFormulating}
             />
           )}
 
-          {/* 9-Step Horizontal Pipeline Bar */}
+          {/* 10-Step Horizontal Pipeline Bar */}
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-[#EB6658]" />
-                9-Step Continuous Autonomous Lifecycle (Click any step to inspect / jump)
+                10-Step Continuous Autonomous Lifecycle (Click any step to inspect / jump)
               </span>
               <div className="flex items-center gap-4 text-xs font-mono">
                 <span className="text-slate-300">
@@ -518,7 +562,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
               {NINE_STEPS.map((st) => {
                 const isCurrent = activeStep === st.num;
                 const isDone = activeStep > st.num;
@@ -692,35 +736,77 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               </div>
             </div>
 
-            {/* Step 3: Formulate Goal & 24h Job */}
+            {/* Step 3: Formulate Goal & 24h Job (Guarded by Immutable Constitution) */}
             <div className="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     <h3 className="text-sm font-bold text-white">
-                      Step 3 · Formulate Primary Goal & Create 24-Hour Job
+                      Step 3 · Formulate Goal from Audit &amp; Form Step 4 Tasks
                     </h3>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleFormulateGoal}
-                    disabled={isFormulating}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold transition cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>
-                      {isFormulating ? 'Formulating with AI...' : 'AI Formulate 24h Goal'}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleFormulateGoal(true)}
+                      disabled={isFormulating}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#EB6658] hover:bg-[#d95547] text-white text-xs font-bold transition cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>
+                        {isFormulating
+                          ? 'Forming Goal & Tasks...'
+                          : 'Feed Audit Goal to Step 3 & Form Tasks'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleFormulateGoal(false)}
+                      disabled={isFormulating}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold transition cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>AI Refine &amp; Form Tasks</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Immutable App Constitution Anchor */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-amber-300">
+                      Immutable App Constitution (Locked Past Context — Never Revised)
                     </span>
-                  </button>
+                    <span className="font-mono text-[11px] text-emerald-400">
+                      {proState?.immutableConstitution?.version || 'CONSTITUTION-v1.0-IMMUTABLE'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    {proState?.immutableConstitution?.coreIdentity ||
+                      'CrewAI Studio: 8-Agent Autonomous Software Engineering Platform with 4-Graph Architecture Alignment, Zero-Breach Rate-Limit Governor, and Authenticated GitHub PAT Sync.'}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                    {(proState?.immutableConstitution?.nonNegotiableInvariants || []).map(
+                      (inv, idx) => (
+                        <div
+                          key={idx}
+                          className="text-[10px] text-slate-400 bg-slate-900/70 px-2 py-1 rounded border border-slate-800/80 truncate"
+                          title={inv}
+                        >
+                          {inv}
+                        </div>
+                      )
+                    )}
+                  </div>
                 </div>
 
                 <div>
                   <label className="text-xs text-slate-400 block mb-1.5">
-                    Primary 24-Hour Autonomous Objective (All Forward & Backward Assessments align to this goal):
+                    Step 3 Formulated 24-Hour Goal (Synthesized from Flaw, Assumption &amp; False-Logic Audit without deviating from the Constitution):
                   </label>
                   <textarea
-                    rows={4}
+                    rows={3}
                     value={goalInput}
                     onChange={(e) => setGoalInput(e.target.value)}
                     placeholder="Describe what you want your CrewAI autonomous workforce to build, optimize, and verify over the next 24 hours..."
@@ -736,7 +822,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                     Target Branch:{' '}
                     <strong className="font-mono text-slate-200">
                       {branchPolicy === 'jules_autonomous_branch'
-                        ? proState?.targetBranch || 'jules/autonomous-v1.2'
+                        ? proState?.targetBranch || 'jules/autonomous-v1.3'
                         : 'main'}
                     </strong>
                   </span>
@@ -767,11 +853,11 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-sky-400" />
                   <h3 className="text-sm font-bold text-white">
-                    Step 4 · Delegated CrewAI Tasks (8-Agent Workforce)
+                    Step 4 · Newly Formed &amp; Delegated CrewAI Tasks (From Step 3 Goal)
                   </h3>
                 </div>
-                <span className="text-[11px] font-mono text-slate-400">
-                  Sequential + Hierarchical Gatekeeper
+                <span className="text-[11px] font-mono text-emerald-400">
+                  {proState?.delegatedTasks.length || 5} Tasks Formed · Constitution-Guarded
                 </span>
               </div>
 
@@ -789,7 +875,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                         <span className="text-xs font-bold text-white">{task.title}</span>
                       </div>
                       <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase shrink-0 ${
                           task.status === 'completed'
                             ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                             : task.status === 'running'
@@ -803,11 +889,16 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
                       <span>
                         Agent: <strong className="text-slate-200">{task.agentName}</strong> (
                         {task.assignedCrewRole})
                       </span>
+                      {task.constitutionGuard && (
+                        <span className="font-mono text-[10px] text-amber-300">
+                          {task.constitutionGuard}
+                        </span>
+                      )}
                     </div>
 
                     <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
@@ -1007,25 +1098,30 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
             </div>
           </div>
 
-          {/* Row 4: Step 9 — End-But-Not-End (Continuous Versioning & Evolution Ledger) */}
+          {/* Row 4: Step 9 (Push & Update Repo) & Step 10 (End-But-Not-End Continuous Versioning) */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <InfinityIcon className="w-4 h-4 text-[#EB6658]" />
                 <h3 className="text-sm font-bold text-white">
-                  Step 9 · End-But-Not-End (Continuous Semantic Versioning & Evolution)
+                  Step 9 · Push & Update Repo &nbsp;→&nbsp; Step 10 · End-But-Not-End (Continuous Versioning)
                 </h3>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">
-                  Software is ready at every release, yet continuously evolves into the next version cycle:
-                </span>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleStepSelectOrAdvance(9)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  <span>Step 9: Push & Update Repo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStepSelectOrAdvance(10)}
                   className="px-2.5 py-1 rounded-lg bg-[#EB6658]/20 hover:bg-[#EB6658]/30 text-[#EB6658] border border-[#EB6658]/40 text-xs font-bold transition cursor-pointer"
                 >
-                  Trigger Version Bump (Step 9)
+                  Step 10: End-But-Not-End (Version Bump)
                 </button>
               </div>
             </div>

@@ -736,10 +736,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={onOpenProMode}
                 title={
                   proStatus.isActive && !proStatus.isPaused
-                    ? `PRO 24h Autonomous Job Active — Step ${proStatus.currentStepNumber}/9 (${proStatus.currentVersion})`
+                    ? `PRO 24h Autonomous Job Active — Step ${proStatus.currentStepNumber}/10 (${proStatus.currentVersion})`
                     : proStatus.isPaused
-                    ? `PRO 24h Autonomous Job Paused at Step ${proStatus.currentStepNumber}/9`
-                    : 'Open PRO Mode: 9-Step 24-Hour Autonomous Software Evolution'
+                    ? `PRO 24h Autonomous Job Paused at Step ${proStatus.currentStepNumber}/10`
+                    : 'Open PRO Mode: 10-Step 24-Hour Autonomous Software Evolution'
                 }
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/95 hover:bg-slate-800 text-white border border-slate-700/90 hover:border-[#EB6658]/60 text-xs font-bold shadow-sm transition cursor-pointer whitespace-nowrap"
               >
@@ -760,7 +760,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Zap className="w-3.5 h-3.5 text-[#EB6658]" />
                 <span>PRO 24h</span>
                 <span className="hidden sm:inline font-mono text-[10px] font-semibold text-slate-400 tabular-nums">
-                  S{proStatus.currentStepNumber}/9
+                  S{proStatus.currentStepNumber}/10
                 </span>
               </button>
             )}

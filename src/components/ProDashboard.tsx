@@ -27,6 +27,15 @@ import {
   FastForward
 } from 'lucide-react';
 
+export interface ProDashboardAuditFinding {
+  id: string;
+  category: 'fatal_flaw' | 'wrong_assumption' | 'false_logic' | 'runtime_error';
+  title: string;
+  flawAnalysis: string;
+  recommendedFix: string;
+  status: 'resolved_in_goal' | 'queued_for_next_goal' | 'verified';
+}
+
 export interface ProDashboardJobState {
   jobId: string;
   isActive: boolean;
@@ -37,7 +46,15 @@ export interface ProDashboardJobState {
   branchPolicy: 'jules_autonomous_branch' | 'direct_main';
   maxHealAttempts: number;
   consecutiveFailures: number;
+  immutableConstitution?: {
+    locked: true;
+    version: string;
+    coreIdentity: string;
+    nonNegotiableInvariants: string[];
+    lastVerifiedAt: string;
+  };
   primaryGoal: string;
+  lastGoalSource?: 'audit_recommendations' | 'user_custom' | 'continuous_cycle_promotion';
   currentStepNumber: number;
   cycleHoursElapsed: number;
   cycleTotalHours: number;
@@ -58,9 +75,11 @@ export interface ProDashboardJobState {
     title: string;
     assignedCrewRole: string;
     agentName: string;
+    constitutionGuard?: string;
     status: 'completed' | 'running' | 'healing' | 'queued';
     progressPct: number;
   }>;
+  auditFindings?: ProDashboardAuditFinding[];
   errorAndFixLedger: Array<{
     id: string;
     timestamp: string;
@@ -98,7 +117,9 @@ interface ProDashboardProps {
   proState: ProDashboardJobState;
   onSelectStep: (stepNumber: number) => void;
   onSwitchToSetup: () => void;
+  onFormulateFromAudit?: () => void;
   isAdvancing?: boolean;
+  isFormulating?: boolean;
 }
 
 const LIFECYCLE_STEPS_META = [
@@ -163,15 +184,23 @@ const LIFECYCLE_STEPS_META = [
     code: '08',
     name: 'Look Backward & Fix',
     owner: 'Sentinel-Sec Auditor',
-    windowHours: '20.5h – 22.5h',
+    windowHours: '20.5h – 22.0h',
     summary: 'Retrospective audit of completed work to eliminate architectural drift.'
   },
   {
     step: 9,
     code: '09',
+    name: 'Push & Update Repo',
+    owner: 'Saved GitHub PAT Bridge',
+    windowHours: '22.0h – 23.0h',
+    summary: 'Auto-upload and push verified workspace commits to the target GitHub repository.'
+  },
+  {
+    step: 10,
+    code: '10',
     name: 'End-But-Not-End',
     owner: 'Release Orchestrator',
-    windowHours: '22.5h – 24.0h',
+    windowHours: '23.0h – 24.0h',
     summary: 'Publish verified semantic version and roll into the next evolution cycle.'
   }
 ];
@@ -180,7 +209,9 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
   proState,
   onSelectStep,
   onSwitchToSetup,
-  isAdvancing = false
+  onFormulateFromAudit,
+  isAdvancing = false,
+  isFormulating = false
 }) => {
   const [selectedMetricTab, setSelectedMetricTab] = useState<'pacing' | 'alignment'>('pacing');
 
@@ -234,8 +265,15 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
         safeRequests: (proState.rateLimitGuard.requestsCompletedSafely || 142) + 74
       },
       {
+        hour: '22h',
+        stepLabel: 'S9 Push Repo',
+        rpmPct: 20,
+        alignmentPct: 99.3,
+        safeRequests: (proState.rateLimitGuard.requestsCompletedSafely || 142) + 86
+      },
+      {
         hour: '24h',
-        stepLabel: 'S9 Version',
+        stepLabel: 'S10 Version',
         rpmPct: 18,
         alignmentPct: 99.5,
         safeRequests: (proState.rateLimitGuard.requestsCompletedSafely || 142) + 96
@@ -364,11 +402,11 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           </div>
         </div>
 
-        {/* KPI 4: Current Versioning State (Step 9: End-But-Not-End) */}
+        {/* KPI 4: Current Versioning State (Step 10: End-But-Not-End) */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Versioning State (Step 9)</span>
+              <span>Versioning State (Step 10)</span>
               <InfinityIcon className="w-4 h-4 text-sky-400" />
             </div>
             <div className="mt-2 flex items-baseline gap-2 tabular-nums">
@@ -383,6 +421,127 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           <div className="mt-3 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-1.5 truncate font-mono">
             <GitBranch className="w-3 h-3 text-sky-400 shrink-0" />
             <span className="text-slate-200 truncate">{proState.targetBranch}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Immutable Constitution + Step 3 Formulated Goal -> Step 4 Newly Formed Tasks Pipeline */}
+      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs text-amber-300 font-mono">
+              <span>{proState.immutableConstitution?.version || 'CONSTITUTION-v1.0-IMMUTABLE'}</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-emerald-400">Locked Past Context (Never Revised)</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-slate-300">
+                Step 3 Goal → {proState.delegatedTasks.length} Step 4 Crew Tasks Formed
+              </span>
+            </div>
+            <h3 className="text-sm font-bold text-white mt-1">
+              Step 3 Audit-Formulated Goal &amp; Newly Created Step 4 Workforce Tasks
+            </h3>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {onFormulateFromAudit && (
+              <button
+                type="button"
+                disabled={isFormulating}
+                onClick={onFormulateFromAudit}
+                className="px-3 py-1.5 rounded-lg bg-[#EB6658] hover:bg-[#d95547] text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>
+                  {isFormulating
+                    ? 'Formulating & Creating Tasks...'
+                    : 'Re-Synthesize Step 3 Goal & Form Step 4 Tasks'}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onSwitchToSetup}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+            >
+              Edit Goal / Constitution View →
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Left 5 cols: Immutable Constitution + Step 3 Active Goal */}
+          <div className="lg:col-span-5 space-y-3">
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-amber-300">
+                  Immutable App Constitution (Never Revised)
+                </span>
+                <span className="font-mono text-[11px] text-emerald-400">100% Enforced</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {proState.immutableConstitution?.coreIdentity ||
+                  'CrewAI Studio: 8-Agent Autonomous Engineering Platform with 4-Graph Architecture Alignment, Zero-Breach Rate-Limit Governor, and Authenticated GitHub PAT Sync.'}
+              </p>
+            </div>
+
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-white">
+                  Step 3 · Formulated Goal (Fed from Flaw &amp; False-Logic Audit)
+                </span>
+                <span className="font-mono text-[11px] text-sky-400">Active Objective</span>
+              </div>
+              <p className="text-xs text-slate-200 leading-relaxed">{proState.primaryGoal}</p>
+            </div>
+          </div>
+
+          {/* Right 7 cols: Newly Formed & Created Step 4 Tasks */}
+          <div className="lg:col-span-7 space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span className="font-semibold text-slate-200">
+                Step 4 · Newly Formed &amp; Created CrewAI Tasks (Proceeding from Step 3 Goal)
+              </span>
+              <span className="font-mono tabular-nums">
+                {proState.delegatedTasks.filter((t) => t.status === 'completed').length}/
+                {proState.delegatedTasks.length} Completed
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {proState.delegatedTasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/90 flex flex-col justify-between gap-1.5"
+                >
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                      <span className="text-white font-bold">Task #{task.stepOrder}</span>
+                      <span
+                        className={
+                          task.status === 'completed'
+                            ? 'text-emerald-400'
+                            : task.status === 'running'
+                            ? 'text-sky-400'
+                            : 'text-amber-300'
+                        }
+                      >
+                        {task.status} · {task.progressPct}%
+                      </span>
+                    </div>
+                    <div className="text-xs font-semibold text-slate-100 mt-0.5 line-clamp-2">
+                      {task.title}
+                    </div>
+                  </div>
+                  <div className="pt-1 border-t border-slate-900 flex items-center justify-between text-[10px] text-slate-400">
+                    <span className="truncate">
+                      <strong className="text-slate-200">{task.agentName}</strong> ·{' '}
+                      {task.assignedCrewRole}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -531,10 +690,10 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
             </ResponsiveContainer>
           </div>
 
-          {/* Secondary BarChart: 9-Step Completion State */}
+          {/* Secondary BarChart: 10-Step Completion State */}
           <div className="pt-2 border-t border-slate-800/80">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-              <span>9-Step Autonomous Progression</span>
+              <span>10-Step Autonomous Progression (S9 Push Repo → S10 End-But-Not-End)</span>
               <span className="font-mono text-[11px] text-slate-300">
                 Click any step on the right to inspect or trigger phase
               </span>
@@ -714,27 +873,38 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           </div>
         </div>
 
-        {/* Col 6-12: Versioning State (Step 9) + Forward/Backward Deep Alignment */}
+        {/* Col 6-12: Repo Push (Step 9) + Versioning State (Step 10) + Forward/Backward Deep Alignment */}
         <div className="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <InfinityIcon className="w-4 h-4 text-sky-400" />
-                <span>Continuous Versioning & Goal Alignment (Steps 7, 8 & 9)</span>
+                <span>Repo Push & Continuous Versioning (Steps 7–10)</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Forward/Backward assessments verify alignment before promoting each semantic release
+                Forward/Backward assessments verify alignment before Step 9 Repo Push & Step 10 Release
               </p>
             </div>
-            <button
-              type="button"
-              disabled={isAdvancing}
-              onClick={() => onSelectStep(9)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EB6658] hover:bg-[#d95547] text-white text-xs font-bold transition cursor-pointer"
-            >
-              <FastForward className="w-3.5 h-3.5" />
-              <span>Promote Next Version (Step 9)</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isAdvancing}
+                onClick={() => onSelectStep(9)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                <span>Step 9: Push Repo</span>
+              </button>
+              <button
+                type="button"
+                disabled={isAdvancing}
+                onClick={() => onSelectStep(10)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EB6658] hover:bg-[#d95547] text-white text-xs font-bold transition cursor-pointer"
+              >
+                <FastForward className="w-3.5 h-3.5" />
+                <span>Step 10: End-But-Not-End</span>
+              </button>
+            </div>
           </div>
 
           {/* Forward (Step 7) & Backward (Step 8) Summary Cards */}
@@ -782,10 +952,10 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
             </div>
           </div>
 
-          {/* Step 9 Semantic Version Lineage */}
+          {/* Step 9 & 10 Semantic Version Lineage */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Step 9 · End-But-Not-End Release Lineage</span>
+              <span>Step 9 (Push Repo) & Step 10 (End-But-Not-End Release Lineage)</span>
               <span className="font-mono text-slate-300 tabular-nums">
                 Active Branch: {proState.targetBranch}
               </span>
