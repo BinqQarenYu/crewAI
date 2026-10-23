@@ -15,6 +15,7 @@ import {
   BarChart3
 } from 'lucide-react';
 import { ObservabilityDashboard } from './ObservabilityDashboard';
+import { DashboardView } from './DashboardView';
 
 interface TraceSpan {
   id: string;
@@ -111,7 +112,7 @@ const SAMPLE_SPANS: TraceSpan[] = [
 ];
 
 export const TraceViewer: React.FC = () => {
-  const [activeView, setActiveView] = useState<'traces' | 'dashboard'>('traces');
+  const [activeView, setActiveView] = useState<'traces' | 'dashboard'>('dashboard');
   const [selectedSpan, setSelectedSpan] = useState<TraceSpan>(SAMPLE_SPANS[0]);
 
   return (
@@ -124,13 +125,13 @@ export const TraceViewer: React.FC = () => {
               <Activity className="w-5 h-5" />
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              {activeView === 'traces' ? 'Observability & OpenTelemetry Tracing' : 'Agent Performance Dashboard'}
+              {activeView === 'traces' ? 'Observability & OpenTelemetry Tracing' : 'Agent Performance & Trace Analytics Dashboard'}
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             {activeView === 'traces' 
               ? 'Real-time execution telemetry, token audits, and sub-millisecond span waterfall breakdown.' 
-              : 'Aggregated success rates, latency distribution, and cost audits for active specialized agents.'}
+              : 'Recharts visualizations of agent execution efficiency, P50/P95 latency distribution, and success rates from historical trace data.'}
           </p>
         </div>
 
@@ -138,8 +139,19 @@ export const TraceViewer: React.FC = () => {
           {/* View Switcher */}
           <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
             <button
+              onClick={() => setActiveView('dashboard')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                activeView === 'dashboard'
+                  ? 'bg-[#EB6658] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Recharts Dashboard</span>
+            </button>
+            <button
               onClick={() => setActiveView('traces')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
                 activeView === 'traces'
                   ? 'bg-[#EB6658] text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -147,17 +159,6 @@ export const TraceViewer: React.FC = () => {
             >
               <Activity className="w-3.5 h-3.5" />
               <span>Trace Spans</span>
-            </button>
-            <button
-              onClick={() => setActiveView('dashboard')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition ${
-                activeView === 'dashboard'
-                  ? 'bg-[#EB6658] text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span>Metrics Dashboard</span>
             </button>
           </div>
 
@@ -173,7 +174,10 @@ export const TraceViewer: React.FC = () => {
       </div>
 
       {activeView === 'dashboard' ? (
-        <ObservabilityDashboard />
+        <div className="space-y-6">
+          <DashboardView />
+          <ObservabilityDashboard />
+        </div>
       ) : (
         <>
           {/* Metrics Row */}

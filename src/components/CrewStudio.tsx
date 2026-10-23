@@ -50,6 +50,7 @@ import { AgentAuditLog } from './AgentAuditLog';
 import { AutonomousPRReviewModule } from './AutonomousPRReviewModule';
 import { PredictiveSchedulerModule } from './PredictiveSchedulerModule';
 import { PredictiveInsightsDashboard } from './PredictiveInsightsDashboard';
+import { DashboardView } from './DashboardView';
 import { RepositoryHealthWidget } from './RepositoryHealthWidget';
 import { WebhookSettingsPanel } from './WebhookSettingsPanel';
 import { RemoteControlModule } from './RemoteControlModule';
@@ -3899,6 +3900,14 @@ if __name__ == "__main__":
         }}
         onNotify={showNotification}
       />
+
+      {/* Agent Telemetry & Trace Analytics Dashboard (Recharts Efficiency, Latency & Success Rates) */}
+      <DashboardView
+        historyRuns={executionHistory}
+        activeLogs={logs}
+        agents={crew.agents}
+      />
+
       <div className="mt-6">
         <RepositoryHealthWidget />
       </div>

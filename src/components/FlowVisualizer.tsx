@@ -19,7 +19,8 @@ import {
   Maximize2,
   Network,
   Layers,
-  ShieldCheck
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
 import { GraphifyRepoVisualizer } from './GraphifyRepoVisualizer';
 import { CrewConfig } from '../types';
@@ -118,6 +119,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
   );
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+  const [optimizationModal, setOptimizationModal] = useState<AlignedFlowStepDef | null>(null);
 
   useEffect(() => {
     if (flowSteps.length > 0 && !flowSteps.some((s) => s.id === selectedStepId)) {
@@ -659,6 +661,12 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
                       <div
                         key={node.id}
                         onMouseDown={(e) => handleStepNodeMouseDown(e, node, index)}
+                        onClick={(e) => {
+                          if (node.isOptimized) {
+                            e.stopPropagation();
+                            setOptimizationModal(node);
+                          }
+                        }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           handleCenterOnStep(node.id);
@@ -668,7 +676,7 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
                           left: `${node.x}px`,
                           top: `${node.y}px`,
                           width: '305px',
-                          cursor: isBeingDragged ? 'grabbing' : 'grab'
+                          cursor: isBeingDragged ? 'grabbing' : node.isOptimized ? 'pointer' : 'grab'
                         }}
                         className={`p-3.5 rounded-2xl border select-none ${
                           isBeingDragged ? 'z-30 shadow-2xl scale-[1.03]' : 'transition-shadow'
@@ -679,9 +687,18 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
                             ? 'bg-slate-900/95 border-indigo-500/70 ring-1 ring-indigo-500/40 z-10'
                             : isPast
                             ? 'bg-slate-900/85 border-emerald-500/40 z-10'
+                            : node.isOptimized
+                            ? 'bg-slate-950/90 border-amber-500/60 shadow-lg shadow-amber-500/10 z-10'
                             : 'bg-slate-950/90 border-slate-800/90 hover:border-slate-700 z-0'
                         }`}
                       >
+                        {node.isOptimized && (
+                            <div className="absolute top-2 right-2">
+                                <span className="flex items-center gap-1 text-[9px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                    <Sparkles className="w-3 h-3"/> AI Opt.
+                                </span>
+                            </div>
+                        )}
                         <div className="flex items-start gap-2.5">
                           <div
                             className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] mt-0.5 shrink-0 tabular-nums ${
@@ -856,6 +873,27 @@ export const FlowVisualizer: React.FC<FlowVisualizerProps> = ({
             </div>
           </div>
         </>
+      )}
+      {optimizationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-lg shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-400" />
+              AI Optimization Suggestion
+            </h3>
+            <p className="text-sm text-slate-300 mb-6 bg-slate-950 p-4 rounded-xl border border-slate-800">
+              {optimizationModal.optimizationSuggestion}
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setOptimizationModal(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -18,6 +18,7 @@ import { GitHubHub } from './components/GitHubHub';
 import { JulesAgentModal } from './components/JulesAgentModal';
 import { ApiDiagnosticsModal } from './components/ApiDiagnosticsModal';
 import { AntigravityRemoteScanModal } from './components/AntigravityRemoteScanModal';
+import { ProModeModal } from './components/ProModeModal';
 import { GlobalCardMinMaxEnhancer } from './components/CardMinMaxControl';
 import { globalTaskThrottler } from './utils/taskThrottler';
 
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
   const [isOllamaPoolOpen, setIsOllamaPoolOpen] = useState<boolean>(false);
   const [isJulesOpen, setIsJulesOpen] = useState<boolean>(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState<boolean>(false);
+  const [isProModeOpen, setIsProModeOpen] = useState<boolean>(false);
   const [isRemoteScanOpen, setIsRemoteScanOpen] = useState<boolean>(() => {
     return typeof window !== 'undefined' && window.location.search.includes('antigravity_remote');
   });
@@ -157,6 +159,7 @@ export const App: React.FC = () => {
         }}
         onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
         onOpenRemoteScan={() => setIsRemoteScanOpen(true)}
+        onOpenProMode={() => setIsProModeOpen(true)}
         selectedRepo={selectedRepo}
         selectedBranch={selectedBranch}
         language={language}
@@ -354,6 +357,21 @@ export const App: React.FC = () => {
         selectedRepo={selectedRepo}
         selectedBranch={selectedBranch}
         initialMode={remoteScanInitialMode}
+      />
+
+      <ProModeModal
+        isOpen={isProModeOpen}
+        onClose={() => setIsProModeOpen(false)}
+        selectedRepo={selectedRepo}
+        selectedBranch={selectedBranch}
+        onRepoChange={(repo) => {
+          setSelectedRepo(repo);
+          localStorage.setItem('crewai_selected_repo', repo);
+        }}
+        onBranchChange={(branch) => {
+          setSelectedBranch(branch);
+          localStorage.setItem('crewai_selected_branch', branch);
+        }}
       />
 
       <GlobalCardMinMaxEnhancer />

@@ -19,7 +19,8 @@ import {
   QrCode,
   UploadCloud,
   RefreshCw,
-  Sliders
+  Sliders,
+  Zap
 } from 'lucide-react';
 import { NotificationCenter } from './NotificationCenter';
 import { globalTaskThrottler, useTaskThrottlerMetrics } from '../utils/taskThrottler';
@@ -33,6 +34,7 @@ interface NavbarProps {
   onOpenJules?: () => void;
   onOpenRemoteScan?: () => void;
   onOpenDiagnostics?: () => void;
+  onOpenProMode?: () => void;
   selectedRepo?: string;
   selectedBranch?: string;
   language: LanguageCode;
@@ -50,6 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenJules,
   onOpenRemoteScan,
   onOpenDiagnostics,
+  onOpenProMode,
   selectedRepo,
   selectedBranch,
   language,
@@ -69,8 +72,60 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [storageKb, setStorageKb] = useState<number>(0);
   const [heapMb, setHeapMb] = useState<number | null>(null);
   const [trimNotice, setTrimNotice] = useState<string | null>(null);
+  const [proStatus, setProStatus] = useState<{
+    isActive: boolean;
+    isPaused: boolean;
+    currentStepNumber: number;
+    currentVersion: string;
+  }>({
+    isActive: true,
+    isPaused: false,
+    currentStepNumber: 5,
+    currentVersion: 'v1.2.0'
+  });
   const throttlerMetrics = useTaskThrottlerMetrics(showRuntimeDrawer);
   const drawerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const syncProHeartbeat = async () => {
+      try {
+        const res = await fetch('/api/pro/status');
+        if (res.ok) {
+          const data = await res.json();
+          setProStatus({
+            isActive: Boolean(data.isActive),
+            isPaused: Boolean(data.isPaused),
+            currentStepNumber: Number(data.currentStepNumber || 5),
+            currentVersion: String(data.currentVersion || 'v1.2.0')
+          });
+        }
+      } catch {
+        // ignore transient network errors
+      }
+    };
+
+    const handleProStatusEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && typeof detail === 'object') {
+        setProStatus({
+          isActive: Boolean(detail.isActive),
+          isPaused: Boolean(detail.isPaused),
+          currentStepNumber: Number(detail.currentStepNumber || 5),
+          currentVersion: String(detail.currentVersion || 'v1.2.0')
+        });
+      } else {
+        syncProHeartbeat();
+      }
+    };
+
+    syncProHeartbeat();
+    const interval = setInterval(syncProHeartbeat, 15000);
+    window.addEventListener('crewai:pro-status-updated', handleProStatusEvent);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('crewai:pro-status-updated', handleProStatusEvent);
+    };
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -184,17 +239,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         extractPatFromBackupEnv(backupEnv) ||
         '').trim();
 
-    if (!token && !patUserLogin) {
-      if (!isAutoTrigger) {
-        onTabChange('github');
-      }
-      return;
-    }
-
     setIsPushingApp(true);
     setPushBanner({
       type: 'info',
-      text: `Pushing full CrewAI Studio workspace to GitHub (${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'})...`
+      text: `Auto-using saved GitHub PAT to push full CrewAI Studio workspace (${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'})...`
     });
 
     try {
@@ -229,13 +277,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           token: token || undefined,
           repo: selectedRepo || 'bingkltech/crewAI',
           branch: selectedBranch || 'main',
-          message: 'feat(app): align Crew Studio DAG, LangGraph StateGraph, Flow DAG & Graphify architecture',
+          message: 'feat(pro-mode): add 24h Pro Mode Autopilot, ProDashboard telemetry & Navbar heartbeat',
           extraFiles
         })
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (isAutoTrigger) {
+          setPushBanner(null);
+          return;
+        }
         throw new Error(data.error || `GitHub push failed (${res.status})`);
       }
 
@@ -247,19 +299,23 @@ export const Navbar: React.FC<NavbarProps> = ({
         localStorage.setItem('crewai_selected_repo', data.repo);
       }
 
-      localStorage.setItem('crewai_auto_pushed_full_app_v3', data.shortSha || 'done');
+      localStorage.setItem('crewai_auto_pushed_full_app_v5_pro', data.shortSha || 'done');
 
       setPushBanner({
         type: 'success',
-        text: `Pushed ${data.filesPushed || 56} app files to ${data.repo}@${data.branch} (Commit ${data.shortSha})`,
+        text: `Auto-pushed ${data.filesPushed || 57} app files using saved PAT to ${data.repo}@${data.branch} (Commit ${data.shortSha})`,
         commitUrl: data.commitUrl,
         repoUrl: data.repoUrl
       });
     } catch (err: any) {
-      setPushBanner({
-        type: 'error',
-        text: `GitHub Push: ${err.message || 'Failed to push app to GitHub'}`
-      });
+      if (!isAutoTrigger) {
+        setPushBanner({
+          type: 'error',
+          text: `GitHub Push: ${err.message || 'Failed to push app to GitHub'}`
+        });
+      } else {
+        setPushBanner(null);
+      }
     } finally {
       setIsPushingApp(false);
     }
@@ -300,7 +356,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               setPatUserLogin(connectData.user.login);
               localStorage.setItem('crewai_github_user_login', connectData.user.login);
             }
-            if (!localStorage.getItem('crewai_auto_pushed_full_app_v3')) {
+            if (!localStorage.getItem('crewai_auto_pushed_full_app_v5_pro')) {
               handlePushEntireApp(token, true);
             }
             return;
@@ -315,7 +371,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           if (data?.login) {
             setPatUserLogin(data.login);
             localStorage.setItem('crewai_github_user_login', data.login);
-            if (!localStorage.getItem('crewai_auto_pushed_full_app_v3')) {
+            if (!localStorage.getItem('crewai_auto_pushed_full_app_v5_pro')) {
               handlePushEntireApp(token || undefined, true);
             }
             return;
@@ -672,6 +728,42 @@ export const Navbar: React.FC<NavbarProps> = ({
               selectedBranch={selectedBranch}
               onNavigateToGitHub={() => onTabChange('github')}
             />
+
+            {/* One-Click PRO Mode (24h Autonomous Lifecycle) CTA with Subtle Heartbeat Pulse */}
+            {onOpenProMode && (
+              <button
+                type="button"
+                onClick={onOpenProMode}
+                title={
+                  proStatus.isActive && !proStatus.isPaused
+                    ? `PRO 24h Autonomous Job Active — Step ${proStatus.currentStepNumber}/9 (${proStatus.currentVersion})`
+                    : proStatus.isPaused
+                    ? `PRO 24h Autonomous Job Paused at Step ${proStatus.currentStepNumber}/9`
+                    : 'Open PRO Mode: 9-Step 24-Hour Autonomous Software Evolution'
+                }
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/95 hover:bg-slate-800 text-white border border-slate-700/90 hover:border-[#EB6658]/60 text-xs font-bold shadow-sm transition cursor-pointer whitespace-nowrap"
+              >
+                <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+                  {proStatus.isActive && !proStatus.isPaused ? (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                    </>
+                  ) : (
+                    <span
+                      className={`relative inline-flex rounded-full h-2 w-2 ${
+                        proStatus.isPaused ? 'bg-amber-400' : 'bg-slate-500'
+                      }`}
+                    />
+                  )}
+                </span>
+                <Zap className="w-3.5 h-3.5 text-[#EB6658]" />
+                <span>PRO 24h</span>
+                <span className="hidden sm:inline font-mono text-[10px] font-semibold text-slate-400 tabular-nums">
+                  S{proStatus.currentStepNumber}/9
+                </span>
+              </button>
+            )}
 
             {/* Primary CTA: One-Click Push App to GitHub */}
             <button

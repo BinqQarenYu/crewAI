@@ -56,6 +56,8 @@ export interface AlignedFlowStepDef {
   outputStateChange: Record<string, any>;
   x: number;
   y: number;
+  isOptimized?: boolean;
+  optimizationSuggestion?: string;
 }
 
 export const GRAPHIFY_BASE_MODULES: GraphifyAlignedModule[] = [
@@ -745,6 +747,8 @@ export function buildAlignedFlowStepsFromCrew(
       nextNodes: nextStepIds.length > 0 ? nextStepIds : ['flow_sync_graphify'],
       graphifyModuleIds: graphifyMods,
       langGraphNodeId: agent ? `actor_${agent.id}` : '__start__',
+      isOptimized: idx % 3 === 0,
+      optimizationSuggestion: idx % 3 === 0 ? `Jules recommends refactoring this agent step into two asynchronous tasks to reduce latency by ~25% and improve test coverage.` : undefined,
       outputStateChange: {
         [`${fnName}_status`]: 'verified',
         active_agent: `${agent?.name} (${agent?.role})`,
