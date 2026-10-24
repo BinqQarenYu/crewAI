@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Secrets & local env  (NEVER commit these)
+.env
+.env.local
+.env.*.local
+
+# Runtime state
+.pro-mode-state.json
+
+# Generated standalone launchers (superseded by `npm run dev` / run.bat)
+/start.bat
+/standalone.bat
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
