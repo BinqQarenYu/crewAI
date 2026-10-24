@@ -70,9 +70,37 @@ than no dashboard.
 | :--- | :--- |
 | Agent / crew / task configuration UI | **Real** — full CRUD in local state, export to `crew.py` / `crew.jsonc` |
 | Crew execution ("Run") | **Real** — a Python 3.12 runner drives crewAI and streams its event bus over SSE |
+| Tools (file read/write/list, time, allowlisted HTTP) | **Real** — sandboxed, bounded, verified to reject path escapes |
+| Scheduling / triggers | **Real** — a crew runs on a timer without a click |
+| Approval gate | **Real** — a schedule can hold each run until a human approves |
+| Retries + circuit breaker | **Real** — backoff, then auto-pause after repeated failures |
+| Cross-run memory | **Real** — per-crew run journal injected into the next run |
+| Persistence | **Real** — run history and schedules survive a restart (`data/crew-studio.json`) |
 | Gemini assistant & smart routing | **Real** — live `@google/genai` calls with key rotation |
 | GitHub panel (connect PAT, push file, push app) | **Real** — calls the GitHub REST API |
 | Env config panel (upload / reload `.env`) | **Real** |
+
+### Autonomy API
+
+```bash
+# run once
+POST /api/crews/recon/runs              {"model":"ollama/llama3","require_approval":false}
+
+# run on a timer, gated by a human
+POST /api/crews/recon/schedules         {"every_seconds":3600,"require_approval":true}
+GET  /api/schedules
+PATCH /api/schedules/:id                {"enabled":false}
+DELETE /api/schedules/:id
+
+# approvals and control
+GET  /api/runs                          # history (persisted)
+POST /api/runs/:id/approve
+POST /api/runs/:id/cancel
+GET  /api/runs/:id/events               # SSE
+```
+
+Guardrails: `CREW_MAX_CONCURRENT_RUNS` (429 beyond), `CREW_RUN_TIMEOUT_MS`,
+`CREW_MAX_TOKENS_PER_RUN`, `CREW_MAX_TOOL_CALLS`, `CREW_MAX_CONSECUTIVE_FAILURES`.
 
 Features that were previously simulated have been **removed** rather than faked:
 Jules dispatch and PR review, Remote PC / QR remote scan, PRO Mode autopilot,

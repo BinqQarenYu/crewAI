@@ -1,0 +1,68 @@
+{
+  // Tests crewAI's hierarchical process: a manager agent must plan and delegate
+  // rather than the runner just executing tasks one after another.
+  "name": "Orchestrator Probe",
+  "process": "hierarchical",
+  "manager_model": "llama3.2",
+  "agents": [
+    {
+      "id": "agent-manager",
+      "name": "Project Manager",
+      "category": "task_controller",
+      "role": "Project Manager",
+      "goal": "Break the work into steps and delegate to the right specialist.",
+      "backstory": "You coordinate two specialists and never do their work yourself.",
+      "duties": ["delegate", "review"],
+      "tools": [],
+      "settings": { "verbose": true, "memory": false, "max_iter": 6, "allow_delegation": true }
+    },
+    {
+      "id": "agent-counter",
+      "name": "Counter",
+      "category": "analysis",
+      "role": "Word Counter",
+      "goal": "Report exact word counts.",
+      "backstory": "You count words precisely.",
+      "duties": ["compare"],
+      "tools": [],
+      "settings": { "verbose": true, "memory": false, "max_iter": 4, "allow_delegation": true }
+    },
+    {
+      "id": "agent-writer",
+      "name": "Writer",
+      "category": "writing",
+      "role": "Copywriter",
+      "goal": "Write short product taglines.",
+      "backstory": "You write punchy taglines.",
+      "duties": ["summarise"],
+      "tools": [],
+      "settings": { "verbose": true, "memory": false, "max_iter": 4, "allow_delegation": true }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-a",
+      "sequence_order": 1,
+      "name": "tagline",
+      "phase": "writing",
+      "description": "Write one tagline of at most 8 words for a coffee subscription.",
+      "expected_output": "One tagline, at most 8 words.",
+      "agent": "agent-writer",
+      "controller_agent": "agent-manager",
+      "depends_on": [],
+      "output_format": "text"
+    },
+    {
+      "id": "task-b",
+      "sequence_order": 2,
+      "name": "count",
+      "phase": "analysis",
+      "description": "State how many words are in the tagline from the previous task.",
+      "expected_output": "A single number.",
+      "agent": "agent-counter",
+      "controller_agent": "agent-manager",
+      "depends_on": ["task-a"],
+      "output_format": "text"
+    }
+  ]
+}

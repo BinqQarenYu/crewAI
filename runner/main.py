@@ -23,11 +23,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import re
 import sys
 import time
 import traceback
 from typing import Any, Dict, List, Optional
+
+from tools import available_tools, bind_tools, get_workspace, set_workspace
 
 # --------------------------------------------------------------------------
 # Keep stdout clean for the JSONL protocol.
@@ -167,7 +170,46 @@ def build_llm(requested: Optional[str]):
 # --------------------------------------------------------------------------
 
 
-def build_crew(definition: Dict[str, Any], model_override: Optional[str]):
+def load_memory_block(memory_file: Optional[str], limit: int = 5) -> str:
+    """Build a short context block from prior run summaries.
+
+    This is a run journal, not vector memory: the most recent `limit` summaries
+    for this crew, newest last. It gives a crew continuity between runs without
+    pulling in an embedding model.
+    """
+    if not memory_file or not os.path.exists(memory_file):
+        return ""
+    try:
+        with open(memory_file, "r", encoding="utf-8") as fh:
+            entries = json.load(fh)
+    except Exception as exc:
+        log(f"Could not read memory file: {exc}", level="warning")
+        return ""
+    if not isinstance(entries, list) or not entries:
+        return ""
+    recent = entries[-limit:]
+    lines = ["Context from previous runs of this crew (most recent last):"]
+    for entry in recent:
+        if not isinstance(entry, dict):
+            continue
+        when = entry.get("finished_at") or entry.get("started_at") or "unknown time"
+        status = entry.get("status", "unknown")
+        output = str(entry.get("output") or "").strip().replace("\n", " ")
+        if len(output) > 400:
+            output = output[:400] + "…"
+        lines.append(f"- [{when}] {status}: {output or '(no output)'}")
+    if len(lines) == 1:
+        return ""
+    lines.append("Use this only as background; do not repeat it verbatim.")
+    return "\n".join(lines)
+
+
+def build_crew(
+    definition: Dict[str, Any],
+    model_override: Optional[str],
+    memory_block: str = "",
+    native_tools: bool = False,
+):
     from crewai import Agent, Crew, Process, Task
 
     agents_spec = definition.get("agents") or []
@@ -184,25 +226,35 @@ def build_crew(definition: Dict[str, Any], model_override: Optional[str]):
 
     for spec in agents_spec:
         aid = str(spec.get("id") or spec.get("name") or f"agent-{len(agents_by_id) + 1}")
-        tools = spec.get("tools") or []
-        if tools:
-            # Honest reporting: tool bindings are not wired up yet, so a crew that
-            # asks for tools runs without them rather than pretending otherwise.
+        requested_tools = spec.get("tools") or []
+        bound_tools, tool_warnings = bind_tools(requested_tools)
+        for warning in tool_warnings:
+            log(f"Agent '{spec.get('name') or aid}': {warning}", level="warning", agent=aid)
+        if bound_tools:
             log(
-                f"Agent '{spec.get('name') or aid}' requested tools {tools}; "
-                "tool binding is not implemented yet, running without them.",
-                level="warning",
+                f"Agent '{spec.get('name') or aid}' bound tools: "
+                f"{[t.name for t in bound_tools]}",
                 agent=aid,
             )
+            for tool in bound_tools:
+                BOUND_TOOLS[tool.name] = tool
+        llm = build_llm(spec.get("model") or crew_model)
+        extra: Dict[str, Any] = {}
+        if native_tools:
+            # Native function calling: the model returns structured tool calls
+            # instead of crewAI parsing ReAct text. Local models that support
+            # tools (qwen2.5, llama3.1+) need this; text parsing fails on them.
+            extra["function_calling_llm"] = llm
         agent = Agent(
             role=spec.get("role") or spec.get("name") or aid,
             goal=spec.get("goal") or "Complete the assigned task.",
             backstory=spec.get("backstory") or "An autonomous agent in Crew Studio.",
-            llm=build_llm(spec.get("model") or crew_model),
+            llm=llm,
             verbose=bool((spec.get("settings") or {}).get("verbose", True)),
             allow_delegation=bool((spec.get("settings") or {}).get("allow_delegation", False)),
             max_iter=int((spec.get("settings") or {}).get("max_iter", 15)),
-            tools=[],
+            tools=bound_tools,
+            **extra,
         )
         agents_by_id[aid] = agent
         agent_objects.append(agent)
@@ -232,8 +284,14 @@ def build_crew(definition: Dict[str, Any], model_override: Optional[str]):
         context_specs = spec.get("depends_on") or []
         context_tasks = [tasks_by_id[c] for c in context_specs if c in tasks_by_id]
 
+        description = spec.get("description") or ""
+        # Cross-run memory: the journal from previous runs is prepended to the
+        # first task only, so later tasks don't drown in repeated context.
+        if memory_block and not task_objects:
+            description = f"{description}\n\n{memory_block}"
+
         task = Task(
-            description=spec.get("description") or "",
+            description=description,
             expected_output=spec.get("expected_output") or "A complete, clear result.",
             agent=agent_obj,
             context=context_tasks or None,
@@ -262,6 +320,13 @@ def build_crew(definition: Dict[str, Any], model_override: Optional[str]):
 # --------------------------------------------------------------------------
 # Event bridge: crewAI event bus -> JSONL
 # --------------------------------------------------------------------------
+
+# Token totals reported by crewAI, shared with the budget check in main().
+TOKENS: Dict[str, Optional[int]] = {"total": None}
+
+# Tools bound in this run, plus a count of real invocations.
+BOUND_TOOLS: Dict[str, Any] = {}
+TOOL_CALLS: Dict[str, int] = {"count": 0}
 
 
 def install_event_bridge() -> List[str]:
@@ -373,12 +438,42 @@ def install_event_bridge() -> List[str]:
             "error": str(getattr(e, "error", "") or "agent error"),
         },
     )
+    def _record_stats(event) -> Dict[str, Any]:
+        tokens = getattr(event, "total_tokens", None)
+        TOKENS["total"] = tokens if isinstance(tokens, int) else None
+        return {"type": "crew_stats", "total_tokens": tokens}
+
+    subscribe("CrewKickoffCompletedEvent", C, _record_stats)
+
+    # Tool activity is the difference between "thinking" and "acting"; surface it.
+    TU = "crewai.events.types.tool_usage_events"
+
+    def _record_tool_start(event) -> Dict[str, Any]:
+        TOOL_CALLS["count"] = TOOL_CALLS.get("count", 0) + 1
+        return {
+            "type": "tool_started",
+            "tool": str(getattr(event, "tool_name", "") or ""),
+            "agent": _role(event),
+        }
+
+    subscribe("ToolUsageStartedEvent", TU, _record_tool_start)
     subscribe(
-        "CrewKickoffCompletedEvent",
-        C,
+        "ToolUsageFinishedEvent",
+        TU,
         lambda e: {
-            "type": "crew_stats",
-            "total_tokens": getattr(e, "total_tokens", None),
+            "type": "tool_finished",
+            "tool": str(getattr(e, "tool_name", "") or ""),
+            "agent": _role(e),
+            "output": str(getattr(e, "output", "") or "")[:600],
+        },
+    )
+    subscribe(
+        "ToolUsageErrorEvent",
+        TU,
+        lambda e: {
+            "type": "tool_error",
+            "tool": str(getattr(e, "tool_name", "") or ""),
+            "error": str(getattr(e, "error", "") or "tool error")[:600],
         },
     )
     return installed
@@ -389,12 +484,106 @@ def install_event_bridge() -> List[str]:
 # --------------------------------------------------------------------------
 
 
+def _parse_text_tool_call(text: str) -> Optional[Dict[str, Any]]:
+    """Try to read a tool call the model wrote as text.
+
+    Local models frequently answer with `{"name": "write_file", "arguments": {...}}`
+    instead of using the tool-call channel. We accept that shape so the action
+    still happens, rather than silently producing prose that claims success.
+    """
+    if not text:
+        return None
+    candidates: List[str] = [text.strip()]
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = [ln for ln in stripped.splitlines() if not ln.strip().startswith("```")]
+        candidates.append("\n".join(lines).strip())
+    first, last = stripped.find("{"), stripped.rfind("}")
+    if first != -1 and last > first:
+        candidates.append(stripped[first : last + 1])
+
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("name") or payload.get("tool") or payload.get("tool_name")
+        args = payload.get("arguments") or payload.get("args") or payload.get("parameters")
+        if isinstance(name, str) and isinstance(args, dict):
+            return {"name": name, "arguments": args}
+    return None
+
+
+def maybe_run_text_tool(output: str) -> str:
+    """Execute a text-expressed tool call if no real tool ran. Returns output."""
+    if TOOL_CALLS.get("count", 0) > 0:
+        return output
+    call = _parse_text_tool_call(output)
+    if not call:
+        return output
+    tool = BOUND_TOOLS.get(call["name"])
+    if tool is None:
+        log(
+            f"Model requested tool '{call['name']}' as text, but it is not bound; ignored.",
+            level="warning",
+        )
+        return output
+
+    log(
+        f"Model expressed a '{call['name']}' call as text; executing it "
+        "(text-mode tool fallback).",
+        level="warning",
+        tool=call["name"],
+    )
+    emit({"type": "tool_started", "tool": tool.name, "source": "text_fallback"})
+    try:
+        result = tool.run(**call["arguments"])
+    except Exception as exc:
+        result = f"ERROR: {type(exc).__name__}: {exc}"
+        emit({"type": "tool_error", "tool": tool.name, "error": str(result)[:600]})
+    else:
+        emit(
+            {
+                "type": "tool_finished",
+                "tool": tool.name,
+                "output": str(result)[:600],
+                "source": "text_fallback",
+            }
+        )
+    TOOL_CALLS["count"] += 1
+    return f"{output}\n\n[tool {tool.name} executed via text fallback] {result}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Crew Studio runner")
     parser.add_argument("--crew", required=True, help="Path to crew definition JSON/JSONC")
     parser.add_argument("--run-id", default="local", help="Run identifier for event correlation")
     parser.add_argument("--inputs", default="{}", help="JSON object of crew inputs")
     parser.add_argument("--model", default=None, help="Override model for all agents")
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Sandbox directory for file tools (default: <repo>/.crew-workspace)",
+    )
+    parser.add_argument(
+        "--memory-file",
+        default=None,
+        help="JSON array of prior run summaries for cross-run context",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=int(os.environ.get("CREW_MAX_TOKENS_PER_RUN", "0")),
+        help="Fail the run if reported token usage exceeds this (0 = no limit)",
+    )
+    parser.add_argument(
+        "--native-tools",
+        choices=["auto", "on", "off"],
+        default=os.environ.get("CREW_NATIVE_TOOLS", "auto"),
+        help="Use native function calling for tools (auto = on for ollama models)",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -404,6 +593,20 @@ def main() -> int:
 
     run_id = args.run_id
     started = time.time()
+
+    # Point the file tools at a sandbox before any agent is built.
+    workspace = set_workspace(
+        args.workspace
+        or os.environ.get(
+            "CREW_WORKSPACE",
+            str(pathlib.Path(__file__).resolve().parent.parent / ".crew-workspace"),
+        )
+    )
+    log(f"Workspace: {workspace}", workspace=str(workspace))
+
+    memory_block = load_memory_block(args.memory_file)
+    if memory_block:
+        log(f"Loaded prior-run context ({len(memory_block)} chars)", level="info")
 
     try:
         definition = load_crew_definition(args.crew)
@@ -417,8 +620,24 @@ def main() -> int:
         emit({"type": "run_failed", "run_id": run_id, "error": f"Invalid --inputs JSON: {exc}", "duration_ms": 0})
         return 2
 
+    # Native function calling is the reliable path for local models; ReAct text
+    # parsing makes them emit tool calls as prose instead of executing them.
+    requested_model = (
+        args.model
+        or definition.get("model")
+        or definition.get("manager_model")
+        or DEFAULT_MODEL
+    )
+    if args.native_tools == "on":
+        native_tools = True
+    elif args.native_tools == "off":
+        native_tools = False
+    else:
+        native_tools = resolve_model(requested_model).startswith("ollama/")
+    log(f"Native function calling: {'on' if native_tools else 'off'}", model=resolve_model(requested_model))
+
     try:
-        crew, agent_ids, task_ids = build_crew(definition, args.model)
+        crew, agent_ids, task_ids = build_crew(definition, args.model, memory_block, native_tools)
     except Exception as exc:
         emit(
             {
@@ -460,6 +679,27 @@ def main() -> int:
     try:
         result = crew.kickoff(inputs=inputs)
         output = getattr(result, "raw", None) or str(result)
+        output = maybe_run_text_tool(str(output))
+
+        # Budget guard: crewAI reports total tokens on completion, so this is
+        # enforced after the fact. It still prevents a runaway crew's output
+        # being accepted as a success.
+        tokens_used = TOKENS.get("total")
+        if args.max_tokens and isinstance(tokens_used, int) and tokens_used > args.max_tokens:
+            emit(
+                {
+                    "type": "run_failed",
+                    "run_id": run_id,
+                    "error": (
+                        f"Token budget exceeded: used {tokens_used} of {args.max_tokens}. "
+                        "Output withheld; raise CREW_MAX_TOKENS_PER_RUN or reduce the crew."
+                    ),
+                    "tokens": tokens_used,
+                    "duration_ms": int((time.time() - started) * 1000),
+                }
+            )
+            return 4
+
         emit(
             {
                 "type": "run_completed",

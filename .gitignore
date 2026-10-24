@@ -38,3 +38,8 @@ runner/.last_run_id
 
 # Crew run artifacts
 crews/*/output/
+crews/*/memory.json
+.crew-workspace/
+
+# Persisted autonomy state (run history + schedules)
+data/
