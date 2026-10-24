@@ -121,10 +121,60 @@ loadEnvWithOverride();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+// ---------------------------------------------------------------------------
+// Security: this server holds paid API keys and a GitHub token, so it must not
+// be usable by arbitrary web origins or other machines on the LAN.
+// Previously CORS was `origin: true` (reflect any origin, with credentials)
+// and the listener bound to 0.0.0.0, which let any website the user visited
+// rewrite .env via POST /api/config/upload-env.
+// ---------------------------------------------------------------------------
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
+
+const ALLOWED_ORIGINS = new Set<string>([
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+  ...String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+]);
+
+const ALLOWED_HOSTS = new Set<string>([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+  ...String(process.env.ALLOWED_HOSTS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+]);
+
 app.use(cors({
-  origin: true,
+  origin(origin, callback) {
+    // Same-origin and non-browser clients send no Origin header.
+    if (!origin) return callback(null, true);
+    return callback(null, ALLOWED_ORIGINS.has(origin));
+  },
   credentials: true
 }));
+
+// Reject cross-origin mutations and DNS-rebinding attempts outright, so a
+// rejected CORS preflight is not the only thing standing between a hostile
+// page and these endpoints.
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+  const hostHeader = req.get('host') || '';
+  const hostname = hostHeader.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (hostname && !ALLOWED_HOSTS.has(hostname)) {
+    return res.status(403).json({ error: 'Host not allowed' });
+  }
+  next();
+});
+
 app.use(express.json({ limit: '15mb' }));
 
 // Server-side polling throttle & TTL response cache so rapid client status polls never spike Node CPU
@@ -258,9 +308,23 @@ app.post('/api/config/upload-env', (req, res) => {
   if (!envContent || typeof envContent !== 'string') {
     return res.status(400).json({ error: 'Missing envContent string in request body' });
   }
+  if (envContent.length > 64 * 1024) {
+    return res.status(413).json({ error: 'envContent too large (max 64 KB)' });
+  }
+  // Only accept plain KEY=VALUE lines so this endpoint cannot be used as an
+  // arbitrary file-write primitive.
+  const invalidLine = envContent
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith('#') && !/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(l));
+  if (invalidLine) {
+    return res.status(400).json({
+      error: `Invalid .env line (expected KEY=VALUE): ${invalidLine.slice(0, 80)}`
+    });
+  }
   try {
     const targetPath = path.resolve(process.cwd(), '.env');
-    fs.writeFileSync(targetPath, envContent, 'utf-8');
+    fs.writeFileSync(targetPath, envContent, { encoding: 'utf-8', mode: 0o600 });
     const status = buildConfigStatusPayload();
     res.json({
       ...status,
@@ -4845,7 +4909,7 @@ async function startServer() {
     const vite = await createServer({
       server: {
         middlewareMode: true,
-        host: '0.0.0.0',
+        host: BIND_HOST,
         port: PORT,
         hmr: false,
         watch: {
@@ -4857,8 +4921,8 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://0.0.0.0:${PORT}`);
+  app.listen(PORT, BIND_HOST, () => {
+    console.log(`Server running at http://${BIND_HOST}:${PORT}`);
     if (process.platform === 'win32' && process.env.STANDALONE_LAUNCH === '1') {
       const appUrl = `http://localhost:${PORT}`;
       console.log(`[STANDALONE] Launching desktop window at ${appUrl} ...`);
