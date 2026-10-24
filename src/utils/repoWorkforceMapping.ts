@@ -31,44 +31,9 @@ export interface RepoWorkforceProfile {
 
 export const CURATED_TARGET_REPOS: RepoWorkforceProfile[] = [
   {
-    repoPattern: 'BinqQarenYu/crewAI',
-    displayRepo: 'BinqQarenYu/crewAI',
-    label: 'Primary Full-Stack App & Studio Platform (BinqQarenYu/crewAI)',
-    presetKey: 'full_stack_app',
-    crewName: 'Full Stack App Development Crew (Complete 8-Agent Org)',
-    processMode: 'hierarchical',
-    managerModel: 'gemini/gemini-4-argon',
-    taskMaker: {
-      name: 'Elena Vance',
-      role: 'Lead Task Maker, PRD Architect & Sprint Decomposer'
-    },
-    taskController: {
-      name: 'Marcus Sterling',
-      role: 'Principal Task Controller, QA Gatekeeper & PM Orchestrator'
-    },
-    specialists: [
-      { name: 'Dr. Aria Lin', role: 'Deep Researcher: Beautiful Dashboards', category: 'Research' },
-      { name: 'Chloe Laurent', role: 'Principal UI/UX Designer', category: 'UI/UX' },
-      { name: 'Liam Vance', role: 'Principal Frontend Architect (React/TS)', category: 'Frontend' },
-      { name: 'Noah Patel', role: 'Senior Backend & API Lead', category: 'Backend' },
-      { name: 'Sofia Rostova', role: 'Principal Database Architect (SQL/Vector)', category: 'Database' },
-      { name: 'Kai Nakamura', role: 'Principal DevOps & Cloud SRE', category: 'DevOps' }
-    ],
-    pipelineCollaborators: [
-      { name: 'Flow Orchestrator', role: 'Stage 1: Quota & Key Slot Router', stage: 'Orchestrator' },
-      { name: 'Google Jules Cloud VM', role: 'Stage 3: Ephemeral Sandbox (PyTest + AST Self-Heal)', stage: 'Jules VM' },
-      { name: 'Sentinel-Sec PR Auditor', role: 'Stage 4: Secondary SAST & AGENTS.md Gatekeeper', stage: 'GitHub PR' }
-    ],
-    defaultBranch: 'main',
-    recommendedTopic:
-      'Build an Enterprise SaaS Operations & Telemetry Platform with Beautiful Bento Dashboard, RBAC Auth, PostgreSQL & CI/CD',
-    summary:
-      'Assigns the complete 8-agent Full-Stack Engineering Organization (Task Maker, Task Controller, Dashboard Researcher, UI/UX, Frontend, Backend, Database, and DevOps) synced with BinqQarenYu/crewAI.'
-  },
-  {
     repoPattern: 'bingkltech/crewAI',
     displayRepo: 'bingkltech/crewAI',
-    label: 'Full-Stack App & Studio Platform (Mirror)',
+    label: 'Full-Stack App & Studio Platform (Default)',
     presetKey: 'full_stack_app',
     crewName: 'Full Stack App Development Crew (Complete 8-Agent Org)',
     processMode: 'hierarchical',

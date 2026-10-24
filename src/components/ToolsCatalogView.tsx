@@ -10,8 +10,10 @@ import {
   Mail,
   ChevronDown,
   ChevronUp,
+  Layers,
 } from 'lucide-react';
 import { GmailWorkspacePanel } from './GmailWorkspacePanel';
+import { SkillSeekersAndRemotePCHub } from './SkillSeekersAndRemotePCHub';
 
 interface ToolsCatalogViewProps {
   onEquipInStudio?: (toolName: string) => void;
@@ -26,17 +28,18 @@ export const ToolsCatalogView: React.FC<ToolsCatalogViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showLiveGmailConsole, setShowLiveGmailConsole] = useState<boolean>(true);
+  const [showSkillSeekersHub, setShowSkillSeekersHub] = useState<boolean>(true);
 
   const categories = [
-    { id: 'all', label: 'All Tools' },
-    { id: 'integration', label: 'Google Workspace (Gmail)' },
+    { id: 'all', label: 'All Tools & Skills' },
+    { id: 'ai_ml', label: 'Skill Seekers & AI/ML' },
+    { id: 'automation', label: 'Legal Remote PC & Automation' },
+    { id: 'integration', label: 'MCP & Google Workspace' },
     { id: 'search', label: 'Search & Research' },
     { id: 'scraping', label: 'Web Scraping' },
-    { id: 'ai_ml', label: 'AI & ML Sandbox' },
     { id: 'database', label: 'Database & SQL' },
     { id: 'files', label: 'File & Document' },
-    { id: 'automation', label: 'Automation & RPA' },
-    { id: 'cloud', label: 'Cloud Storage' },
+    { id: 'cloud', label: 'Cloud & SRE' },
   ];
 
   const filteredTools = TOOLS_CATALOG.filter((tool) => {
@@ -65,18 +68,31 @@ export const ToolsCatalogView: React.FC<ToolsCatalogViewProps> = ({
               <Wrench className="w-5 h-5" />
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              CrewAI Tools Catalog
+              CrewAI Tools, Skill Seekers v3.9+ & Remote PC Hub
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Official tools ecosystem including live Google Workspace Gmail integration, web retrieval, code sandboxing, and database queries.
+            Universal skill synthesis from bingkltech/Skill_Seekers (19 sources → 23 targets, 40 MCP tools), legal multi-PC connection bridge, and official CrewAI tools.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => setShowSkillSeekersHub((prev) => !prev)}
+            className="px-3.5 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <Layers className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{showSkillSeekersHub ? 'Hide Skill Seekers & PC Hub' : 'Open Skill Seekers & PC Hub'}</span>
+            {showSkillSeekersHub ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+
           <button
             onClick={() => setShowLiveGmailConsole((prev) => !prev)}
-            className="px-3.5 py-2 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-1.5 transition"
+            className="px-3.5 py-2 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
           >
             <Mail className="w-3.5 h-3.5 text-red-400" />
             <span>{showLiveGmailConsole ? 'Hide Gmail Console' : 'Open Live Gmail Tool'}</span>
@@ -92,7 +108,7 @@ export const ToolsCatalogView: React.FC<ToolsCatalogViewProps> = ({
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
             <input
               type="text"
-              placeholder="Search tools, Gmail, env vars..."
+              placeholder="Search Skill Seekers, Remote PC, tools..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 pl-9 pr-3 py-2 rounded-xl focus:border-[#EB6658] outline-none transition"
@@ -117,6 +133,14 @@ export const ToolsCatalogView: React.FC<ToolsCatalogViewProps> = ({
           </button>
         ))}
       </div>
+
+      {/* Skill Seekers v3.9+ Universal Engine & Legal Multi-PC Connection Hub */}
+      {showSkillSeekersHub && (
+        <SkillSeekersAndRemotePCHub
+          onEquipInStudio={onEquipInStudio}
+          onUseSkillPromptInStudio={onUseEmailInStudio}
+        />
+      )}
 
       {/* Live Connected Gmail Workspace Tool Console inside the Catalog */}
       {showLiveGmailConsole &&

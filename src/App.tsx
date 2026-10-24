@@ -51,7 +51,7 @@ export const App: React.FC = () => {
 
   // Lifted GitHub state
   const [selectedRepo, setSelectedRepo] = useState<string>(
-    () => localStorage.getItem('crewai_selected_repo') || 'BinqQarenYu/crewAI'
+    () => localStorage.getItem('crewai_selected_repo') || 'bingkltech/crewAI'
   );
   const [selectedBranch, setSelectedBranch] = useState<string>(
     () => localStorage.getItem('crewai_selected_branch') || 'main'
