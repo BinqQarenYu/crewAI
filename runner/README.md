@@ -54,14 +54,72 @@ warnings, tracebacks — is redirected to stderr so the stream stays parseable.
 {"type":"run_completed","run_id":"…","output":"…","duration_ms":12800}
 ```
 
-`run_failed` carries `error` and a truncated `trace`.
+`run_failed` carries `error` and a truncated `trace`. Tool activity appears as
+`tool_started` / `tool_finished` / `tool_error`.
+
+## Tools (acting, not describing)
+
+`tools.py` gives agents real capabilities inside a sandbox:
+
+| Tool | What it does |
+|---|---|
+| `read_file` | read a UTF-8 file in the workspace |
+| `write_file` | create/overwrite a file, parents auto-created |
+| `list_files` | list a directory |
+| `current_time` | ISO-8601 timestamp |
+| `http_get` | fetch an allowlisted host, 20 KB cap |
+
+Rules, all verified:
+
+- **Sandboxed**: every path is resolved and must stay inside `--workspace`
+  (default `<repo>/.crew-workspace`). `../escape.txt` and absolute paths are
+  rejected — no file escapes.
+- **Bounded**: each tool carries `max_usage_count` (default 25,
+  `CREW_MAX_TOOL_CALLS`), so a looping agent cannot hammer the disk.
+- **Network allowlist**: `CREW_HTTP_ALLOWLIST`.
+- **Honest mapping**: studio names needing a paid provider (`SerperDevTool`,
+  `ScrapeWebsiteTool`, …) are reported unavailable and skipped, never swapped
+  for something with different behaviour.
+
+### Local-model tool calling
+
+Small models often emit a tool call as *text* (`{"name":"write_file",…}`)
+instead of using the tool channel, so nothing executes. Two mitigations:
+
+1. `--native-tools auto|on|off` wires `function_calling_llm` for models with
+   native function calling (auto: on for Ollama models).
+2. A **text-mode fallback** executes a JSON tool call found in the final answer,
+   emits `tool_started`/`tool_finished` with `"source": "text_fallback"`, and
+   appends the real result. It warns in the stream rather than pretending the
+   framework did it.
+
+## Memory between runs
+
+The gateway appends every finished run to `crews/<name>/memory.json` (last 50).
+When present the runner is passed `--memory-file` and prepends a short journal to
+the **first** task:
+
+```
+Context from previous runs of this crew (most recent last):
+- [2026-10-24T16:05:08.638Z] succeeded: A git repository is …
+Use this only as background; do not repeat it verbatim.
+```
+
+A run journal, not vector memory — deliberately dependency-free.
+
+## Budgets
+
+| Guard | Where |
+|---|---|
+| `--max-tokens` / `CREW_MAX_TOKENS_PER_RUN` | run fails if crewAI reports more; output withheld |
+| `CREW_MAX_TOOL_CALLS` | per-tool `max_usage_count` |
+| `CREW_RUN_TIMEOUT_MS` | gateway kills the process |
+| `CREW_MAX_CONCURRENT_RUNS` | gateway returns 429 beyond the cap |
 
 ## Design notes
 
 - **Tracing is disabled** (`CREWAI_TRACING_ENABLED=false`). Without this, crewAI
   prompts "Share this execution trace?" on first run and blocks the process.
-- **Tools are not bound yet.** A crew that requests tools logs a `warning` event
-  and runs without them, rather than silently pretending.
 - **One process per run**, spawned by `server/crewRunner.ts`, so a run can be
   killed and timed out independently.
 - `crews/<name>/crew.jsonc` is the unit of work. The studio writes it, the runner

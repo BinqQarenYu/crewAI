@@ -1,0 +1,33 @@
+{
+  // Proves the agent can ACT, not just talk: it must create a real file.
+  "name": "Action Probe",
+  "process": "sequential",
+  "manager_model": "llama3",
+  "agents": [
+    {
+      "id": "agent-filewright",
+      "name": "File Wright",
+      "category": "engineering",
+      "role": "File Operator",
+      "goal": "Carry out precise filesystem instructions using the provided tools.",
+      "backstory": "You follow instructions exactly and verify your work with tools.",
+      "duties": ["write"],
+      "tools": ["FileWriterTool", "FileReadTool"],
+      "settings": { "verbose": true, "memory": false, "max_iter": 6, "allow_delegation": false }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-write",
+      "sequence_order": 1,
+      "name": "write_note",
+      "phase": "engineering",
+      "description": "Use the write_file tool to create a file at path 'agent-note.txt' whose exact content is: hello from the crew",
+      "expected_output": "Confirmation that the file was written.",
+      "agent": "agent-filewright",
+      "controller_agent": null,
+      "depends_on": [],
+      "output_format": "text"
+    }
+  ]
+}
