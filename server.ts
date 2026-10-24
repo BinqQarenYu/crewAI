@@ -1109,9 +1109,9 @@ app.post('/api/github/push-app', async (req, res) => {
   loadEnvWithOverride();
   const {
     token: clientToken,
-    repo: requestedRepoFull = 'bingkltech/crewAI',
+    repo: requestedRepoFull = 'BinqQarenYu/crewAI',
     branch: requestedBranch = 'main',
-    message = 'feat(app): push full CrewAI Studio application & multi-agent presets',
+    message = 'feat(app): push full CrewAI Studio application & Step 2.1 Pull Target',
     extraFiles = []
   } = req.body || {};
 
@@ -3990,7 +3990,7 @@ async function pullProjectTargetFromGitHub(
   repoFullName: string,
   targetBranch: string
 ): Promise<ProModeJobState['pulledTarget']> {
-  const cleanRepo = (repoFullName || 'bingkltech/crewAI').trim();
+  const cleanRepo = (repoFullName || 'BinqQarenYu/crewAI').trim();
   const baseBranch = 'main';
   const token = getGithubToken();
   const headers: Record<string, string> = {
@@ -4207,11 +4207,11 @@ const defaultProModeState: ProModeJobState = {
   isActive: true,
   isPaused: false,
   githubConnected: Boolean(getGithubToken()),
-  selectedRepo: 'bingkltech/crewAI',
+  selectedRepo: 'BinqQarenYu/crewAI',
   targetBranch: 'jules/autonomous-v1.3',
   branchPolicy: 'jules_autonomous_branch',
   pulledTarget: {
-    repo: 'bingkltech/crewAI',
+    repo: 'BinqQarenYu/crewAI',
     branch: 'jules/autonomous-v1.3',
     baseBranch: 'main',
     pulledAt: 'Just now',
@@ -4219,7 +4219,7 @@ const defaultProModeState: ProModeJobState = {
     filesCount: 54,
     commitsCount: 12,
     latestCommitSha: 'a94c7e2',
-    latestCommitMessage: 'Pulled target project bingkltech/crewAI AST & 4-Graph dependency index',
+    latestCommitMessage: 'Pulled target project BinqQarenYu/crewAI AST & 4-Graph dependency index',
     latestCommitAuthor: 'GitHub Target Bridge',
     sampleFiles: [
       'server.ts',
