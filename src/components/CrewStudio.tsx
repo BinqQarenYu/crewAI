@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AgentConfig, TaskConfig, CrewConfig, ExecutionLog, JulesContext, AuditCycleStage } from '../types';
+import { startRealRun } from '../services/realRun';
 import { TOOLS_CATALOG } from '../data/toolsCatalog';
 import { 
   Play, 
@@ -2140,6 +2141,99 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
     setLiveProgressPct(5);
     setExecElapsedMs(0);
     setLogs([]);
+
+    // --- Real execution path -------------------------------------------------
+    // Try the actual crewAI runner first. Only when the Python runner is not
+    // installed does this fall through to the offline simulator below, and the
+    // user is told so in the log rather than shown invented telemetry.
+    const initialRealTasks: Record<string, LiveTaskExecutionItem> = {};
+    crew.tasks.forEach((t, idx) => {
+      const assigned =
+        crew.agents.find((a) => a.id === t.agentId) ||
+        crew.agents[idx % Math.max(1, crew.agents.length)];
+      initialRealTasks[t.id] = {
+        taskId: t.id,
+        taskName: t.name,
+        phase: t.phase,
+        agentId: assigned?.id || '',
+        agentName: assigned?.name || `Agent ${idx + 1}`,
+        agentRole: assigned?.role || 'Specialist',
+        status: 'queued',
+        progressPct: 0,
+        durationMs: 0,
+        tokensUsed: 0
+      };
+    });
+
+    // crewAI reports task *descriptions*; map those back onto studio task ids.
+    const realTaskIdFor = (label: string): string | null => {
+      const direct = crew.tasks.find((t) => t.id === label);
+      if (direct) return direct.id;
+      const described = crew.tasks.find((t) => t.description === label || t.name === label);
+      return described ? described.id : null;
+    };
+
+    setTaskExecutions(initialRealTasks);
+    setActiveExecTaskId(crew.tasks[0]?.id || null);
+    setActiveExecAgentId(crew.agents[0]?.id || null);
+
+    const usedRealRunner = await startRealRun(
+      crew,
+      {
+        onLog: (log) => setLogs((prev) => [...prev.slice(-299), log]),
+        onTask: (taskLabel, status) => {
+          const id = realTaskIdFor(taskLabel);
+          if (!id) return;
+          setTaskExecutions((prev) => {
+            const existing = prev[id] || initialRealTasks[id];
+            if (!existing) return prev;
+            return {
+              ...prev,
+              [id]: {
+                ...existing,
+                status:
+                  status === 'running'
+                    ? 'reasoning'
+                    : status === 'completed'
+                      ? 'completed'
+                      : 'throttled',
+                progressPct: status === 'completed' ? 100 : 50
+              }
+            };
+          });
+          if (status === 'running') setActiveExecTaskId(id);
+        },
+        onProgress: (pct) => setLiveProgressPct(pct),
+        onDone: (result) => {
+          setExecElapsedMs(result.durationMs);
+          setIsRunning(false);
+          setActiveCycleStage(result.ok ? 'completed' : 'orchestrator');
+          if (!result.ok && result.error) {
+            setLogs((prev) => [
+              ...prev,
+              {
+                id: `run-error-${Date.now()}`,
+                timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+                isoTimestamp: new Date().toISOString(),
+                stage: 'crew',
+                severity: 'error',
+                type: 'system',
+                title: 'Execution failed',
+                content: result.error
+              } as ExecutionLog
+            ]);
+          }
+          endHeavyKickoff();
+        }
+      },
+      { inputs: { topic: runInput } }
+    );
+
+    if (usedRealRunner) {
+      setExecElapsedMs(0);
+      return;
+    }
+
     const runLogsAccumulator: ExecutionLog[] = [];
     const runTraceId = `tr-${Math.random().toString(16).slice(2, 6)}`;
     let spanCounter = 1;
