@@ -27,3 +27,14 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Python runner
+runner/.venv/
+__pycache__/
+*.py[cod]
+runner/*.jsonl
+runner/*.err
+runner/.last_run_id
+
+# Crew run artifacts
+crews/*/output/

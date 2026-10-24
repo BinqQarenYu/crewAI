@@ -1,0 +1,66 @@
+{
+  // Smoke-test crew in the exact shape CrewStudio's generateJsonc() emits.
+  "name": "Repo Recon",
+  "process": "sequential",
+  "manager_model": "llama3.2",
+  "agents": [
+    {
+      "id": "agent-researcher",
+      "name": "Repository Researcher",
+      "category": "research",
+      "role": "Repository Researcher",
+      "goal": "Explain what a repository is for in two sentences.",
+      "backstory": "You are a precise technical researcher who answers briefly.",
+      "duties": ["summarise"],
+      "tools": [],
+      "settings": {
+        "verbose": true,
+        "memory": false,
+        "max_iter": 3,
+        "allow_delegation": false
+      }
+    },
+    {
+      "id": "agent-writer",
+      "name": "Brief Writer",
+      "category": "writing",
+      "role": "Brief Writer",
+      "goal": "Turn research notes into a one-line executive summary.",
+      "backstory": "You compress findings into a single clear sentence.",
+      "duties": ["summarise"],
+      "tools": [],
+      "settings": {
+        "verbose": true,
+        "memory": false,
+        "max_iter": 3,
+        "allow_delegation": false
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-research",
+      "sequence_order": 1,
+      "name": "research_task",
+      "phase": "research",
+      "description": "In two sentences, explain what a git repository is used for.",
+      "expected_output": "Two sentences of plain prose.",
+      "agent": "agent-researcher",
+      "controller_agent": null,
+      "depends_on": [],
+      "output_format": "text"
+    },
+    {
+      "id": "task-write",
+      "sequence_order": 2,
+      "name": "summary_task",
+      "phase": "writing",
+      "description": "Summarise the research into one sentence of at most 25 words.",
+      "expected_output": "A single sentence.",
+      "agent": "agent-writer",
+      "controller_agent": null,
+      "depends_on": ["task-research"],
+      "output_format": "text"
+    }
+  ]
+}
