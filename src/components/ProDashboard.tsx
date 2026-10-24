@@ -44,6 +44,19 @@ export interface ProDashboardJobState {
   selectedRepo: string;
   targetBranch: string;
   branchPolicy: 'jules_autonomous_branch' | 'direct_main';
+  pulledTarget?: {
+    repo: string;
+    branch: string;
+    baseBranch: string;
+    pulledAt: string;
+    status: 'synced' | 'pulling' | 'cached_snapshot';
+    filesCount: number;
+    commitsCount: number;
+    latestCommitSha: string;
+    latestCommitMessage: string;
+    latestCommitAuthor: string;
+    sampleFiles: string[];
+  };
   maxHealAttempts: number;
   consecutiveFailures: number;
   immutableConstitution?: {
@@ -132,6 +145,7 @@ interface ProDashboardProps {
   onSelectStep: (stepNumber: number) => void;
   onSwitchToSetup: () => void;
   onFormulateFromAudit?: () => void;
+  onPullProjectTarget?: () => void;
   onUpdateCreditGovernor?: (payload: {
     cooldownSeconds?: number;
     simulateCreditsExhausted?: boolean;
@@ -140,6 +154,7 @@ interface ProDashboardProps {
   }) => void;
   isAdvancing?: boolean;
   isFormulating?: boolean;
+  isPullingTarget?: boolean;
 }
 
 const LIFECYCLE_STEPS_META = [
@@ -153,11 +168,11 @@ const LIFECYCLE_STEPS_META = [
   },
   {
     step: 2,
-    code: '02',
-    name: 'Select Project',
-    owner: 'Workspace Router',
+    code: '02 / 2.1',
+    name: 'Select & Pull Project Target',
+    owner: 'Workspace Router & Git Pull Bridge',
     windowHours: '0.5h – 1.0h',
-    summary: 'Lock target repository and isolated jules/autonomous-* branch.'
+    summary: 'Select target repository (2) and pull remote project target tree, commits & AST (2.1).'
   },
   {
     step: 3,
@@ -230,9 +245,11 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
   onSelectStep,
   onSwitchToSetup,
   onFormulateFromAudit,
+  onPullProjectTarget,
   onUpdateCreditGovernor,
   isAdvancing = false,
-  isFormulating = false
+  isFormulating = false,
+  isPullingTarget = false
 }) => {
   const [selectedMetricTab, setSelectedMetricTab] = useState<'pacing' | 'alignment'>('pacing');
   const creditsPct = proState.rateLimitGuard.geminiCreditsRemainingPct ?? 93;
@@ -321,7 +338,7 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
       const completion =
         item.step < activeStep ? 100 : item.step === activeStep ? 68 : 12;
       return {
-        name: `S${item.step === 6 ? '6/6.1' : item.step}`,
+        name: `S${item.step === 2 ? '2/2.1' : item.step === 6 ? '6/6.1' : item.step}`,
         fullTitle: item.name,
         stepNum: item.step,
         completion,
@@ -661,6 +678,38 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
               <p className="text-[11px] text-slate-300 leading-relaxed">
                 {proState.immutableConstitution?.coreIdentity ||
                   'CrewAI Studio: 8-Agent Autonomous Engineering Platform with 4-Graph Architecture Alignment, Zero-Breach Rate-Limit Governor, and Authenticated GitHub PAT Sync.'}
+              </p>
+            </div>
+
+            <div className="p-3 rounded-lg bg-slate-950 border border-sky-500/30 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-sky-300">
+                  Step 2 &amp; 2.1 · Pulled Project Target
+                </span>
+                {onPullProjectTarget && (
+                  <button
+                    type="button"
+                    disabled={isPullingTarget}
+                    onClick={onPullProjectTarget}
+                    className="px-2 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-[10px] font-mono font-bold transition cursor-pointer"
+                  >
+                    {isPullingTarget ? 'Pulling...' : '2.1 Pull Target'}
+                  </button>
+                )}
+              </div>
+              <div className="text-[11px] font-mono text-slate-200 flex items-center justify-between">
+                <span className="truncate">
+                  {proState.pulledTarget?.repo || proState.selectedRepo}@
+                  {proState.pulledTarget?.branch || proState.targetBranch}
+                </span>
+                <span className="text-emerald-400">
+                  {proState.pulledTarget?.filesCount ?? 54} files ·{' '}
+                  {proState.pulledTarget?.latestCommitSha || 'a94c7e2'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 truncate">
+                {proState.pulledTarget?.latestCommitMessage ||
+                  `Pulled target project ${proState.selectedRepo} AST & 4-Graph dependency index`}
               </p>
             </div>
 

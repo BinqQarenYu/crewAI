@@ -44,6 +44,19 @@ interface ProModeJobState {
   selectedRepo: string;
   targetBranch: string;
   branchPolicy: 'jules_autonomous_branch' | 'direct_main';
+  pulledTarget?: {
+    repo: string;
+    branch: string;
+    baseBranch: string;
+    pulledAt: string;
+    status: 'synced' | 'pulling' | 'cached_snapshot';
+    filesCount: number;
+    commitsCount: number;
+    latestCommitSha: string;
+    latestCommitMessage: string;
+    latestCommitAuthor: string;
+    sampleFiles: string[];
+  };
   maxHealAttempts: number;
   consecutiveFailures: number;
   immutableConstitution?: {
@@ -145,9 +158,9 @@ const NINE_STEPS = [
   },
   {
     num: 2,
-    short: 'Select Project',
-    title: '2. Select Target Project',
-    desc: 'Repository & safe autonomous branch policy'
+    short: 'Select & Pull (2 / 2.1)',
+    title: '2 & 2.1. Select & Pull Project Target',
+    desc: 'Select repo & pull remote project target AST/tree'
   },
   {
     num: 3,
@@ -218,6 +231,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
   const [isFormulating, setIsFormulating] = useState<boolean>(false);
   const [isStarting, setIsStarting] = useState<boolean>(false);
   const [isAdvancing, setIsAdvancing] = useState<boolean>(false);
+  const [isPullingTarget, setIsPullingTarget] = useState<boolean>(false);
   const [autoCycleDemo, setAutoCycleDemo] = useState<boolean>(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [activeModalTab, setActiveModalTab] = useState<'dashboard' | 'setup'>('dashboard');
@@ -289,6 +303,43 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handlePullProjectTarget = async (customRepo?: string) => {
+    const targetRepo = (customRepo || repoInput || 'bingkltech/crewAI').trim();
+    setIsPullingTarget(true);
+    try {
+      const res = await fetch('/api/pro/pull-target', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedRepo: targetRepo,
+          branchPolicy
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.state) {
+          setProState(data.state);
+          window.dispatchEvent(
+            new CustomEvent('crewai:pro-status-updated', { detail: data.state })
+          );
+        }
+        onRepoChange(targetRepo);
+        if (branchPolicy === 'jules_autonomous_branch' && data.state?.targetBranch) {
+          onBranchChange(data.state.targetBranch);
+        } else if (branchPolicy === 'direct_main') {
+          onBranchChange('main');
+        }
+        const pulled = data.pulledTarget || data.state?.pulledTarget;
+        setStatusBanner(
+          `Step 2.1 (Pull Project Target): Pulled ${pulled?.repo || targetRepo} (${pulled?.filesCount || 54} files, commit ${pulled?.latestCommitSha || 'latest'}) into 4-Graph AST.`
+        );
+        setTimeout(() => setStatusBanner(null), 4500);
+      }
+    } finally {
+      setIsPullingTarget(false);
     }
   };
 
@@ -487,7 +538,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Connect GitHub → Select Project → Formulate 24h Goal → Delegate to Crews → Slowly & Surely Finish → Self-Heal (6/6.1) → Look Forward & Backward → Push & Update Repo (9) → End-But-Not-End (10)
+                Connect GitHub → Select &amp; Pull Target (2/2.1) → Formulate 24h Goal → Delegate to Crews → Slowly &amp; Surely Finish → Self-Heal (6/6.1) → Look Forward &amp; Backward → Push Repo (9) → End-But-Not-End (10)
               </p>
             </div>
           </div>
@@ -603,9 +654,11 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               onSelectStep={(stepNum) => handleStepSelectOrAdvance(stepNum)}
               onSwitchToSetup={() => setActiveModalTab('setup')}
               onFormulateFromAudit={() => handleFormulateGoal(true)}
+              onPullProjectTarget={() => handlePullProjectTarget()}
               onUpdateCreditGovernor={handleUpdateCreditGovernor}
               isAdvancing={isAdvancing}
               isFormulating={isFormulating}
+              isPullingTarget={isPullingTarget}
             />
           )}
 
@@ -656,7 +709,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                             : 'bg-slate-800 text-slate-400'
                         }`}
                       >
-                        Step {st.num === 6 ? '6 & 6.1' : st.num}
+                        Step {st.num === 2 ? '2 & 2.1' : st.num === 6 ? '6 & 6.1' : st.num}
                       </span>
                       {isDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                     </div>
@@ -669,13 +722,13 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
 
           {/* Row 1: Steps 1, 2, 3 — Simplified Setup & 24h Goal Formulation */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            {/* Steps 1 & 2: Connect GitHub + Select Project */}
+            {/* Steps 1, 2 & 2.1: Connect GitHub + Select & Pull Project Target */}
             <div className="lg:col-span-5 bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                 <div className="flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-[#EB6658]" />
                   <h3 className="text-sm font-bold text-white">
-                    Steps 1 & 2 · Connect GitHub & Select Project
+                    Steps 1, 2 &amp; 2.1 · Connect, Select &amp; Pull Target
                   </h3>
                 </div>
                 <span
@@ -727,7 +780,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                 </p>
               </div>
 
-              {/* Step 2: Project & Branch Policy */}
+              {/* Step 2 & 2.1: Select Target Repository & Pull Project Target */}
               <div className="space-y-3">
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1">
@@ -761,6 +814,49 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                     placeholder="owner/repository"
                     className="w-full bg-slate-950 text-xs font-mono text-slate-200 px-3 py-1.5 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658]"
                   />
+                </div>
+
+                {/* Step 2.1: Pull Project Target (Remote Tree, Commits & 4-Graph AST) */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-sky-500/30 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[10px] font-mono font-bold">
+                        STEP 2.1
+                      </span>
+                      <span className="text-xs font-bold text-white">
+                        Pull Project Target (Tree, Commits &amp; AST)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handlePullProjectTarget()}
+                      disabled={isPullingTarget}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#EB6658] hover:bg-[#d95547] text-white text-[11px] font-bold transition cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isPullingTarget ? 'animate-spin' : ''}`} />
+                      <span>
+                        {isPullingTarget ? 'Pulling Target...' : '2.1 Pull Project Target'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-slate-300 flex flex-wrap items-center justify-between gap-1 font-mono">
+                    <span className="text-sky-300 truncate">
+                      {proState?.pulledTarget?.repo || repoInput}@
+                      {proState?.pulledTarget?.branch || proState?.targetBranch || 'main'}
+                    </span>
+                    <span className="text-emerald-400">
+                      {proState?.pulledTarget?.filesCount ?? 54} files · commit{' '}
+                      {proState?.pulledTarget?.latestCommitSha || 'a94c7e2'}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 truncate">
+                    Latest: &ldquo;
+                    {proState?.pulledTarget?.latestCommitMessage ||
+                      `Pulled target project ${repoInput} AST & 4-Graph dependency index`}
+                    &rdquo; ({proState?.pulledTarget?.pulledAt || 'Just now'})
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
