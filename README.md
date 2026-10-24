@@ -69,37 +69,43 @@ than no dashboard.
 | Module | Status |
 | :--- | :--- |
 | Agent / crew / task configuration UI | **Real** — full CRUD in local state, export to `crew.py` / `crew.jsonc` |
+| Crew execution ("Run") | **Real** — a Python 3.12 runner drives crewAI and streams its event bus over SSE |
 | Gemini assistant & smart routing | **Real** — live `@google/genai` calls with key rotation |
 | GitHub panel (connect PAT, push file, push app) | **Real** — calls the GitHub REST API |
 | Env config panel (upload / reload `.env`) | **Real** |
-| Crew "run" + reasoning log | **Simulated** — generates a plausible trace; crewAI is never executed |
-| Jules dispatch & PR review | **Simulated** — PR numbers are randomly generated |
-| Remote PC hub / Remote scan | **Simulated** — actions return canned summaries |
-| Predictive scheduler / Pro Mode autopilot | **Simulated** |
-| Telemetry latency ("measured RTT") | **Simulated** — random numbers, not measurements |
 
-If you want the simulated modules to become real, the backend needs to shell out
-to the actual `crewai` Python package and report real job state — see
+Features that were previously simulated have been **removed** rather than faked:
+Jules dispatch and PR review, Remote PC / QR remote scan, PRO Mode autopilot,
+the predictive scheduler, webhooks, and the generated `standalone.bat` download.
+Their API routes return `404`, and unmatched `/api/*` paths now return a JSON
+`404` instead of the SPA `index.html` — which previously masked missing
+endpoints with a `200 text/html`.
+
+If you want any of those back, they need a real implementation — see
 [Roadmap](#roadmap).
 
 ## Project structure
 
 ```
-server.ts                 Express server + API (single file, ~4.9k lines)
+server.ts                 Express server + API (route handlers)
+server/crewRunner.ts      Real crew execution: spawn runner, SSE, run registry
+runner/                   Python 3.12 crewAI runner (JSONL event protocol)
 src/
   components/             React UI (CrewStudio, LangGraphView, dashboards…)
-  lib/                    Shared helpers
-crews/                    Example crew definitions
+  services/realRun.ts     Client for start + SSE subscription
+crews/                    Crew definitions on disk (crews/<name>/crew.jsonc)
 public/                   Static assets
 run.bat                   Windows launcher
 ```
 
 ## Roadmap
 
-1. Replace the simulated crew runner with a real Python subprocess calling `crewai`.
-2. Split `server.ts` into route modules; split the largest components.
-3. Add a test suite (currently none) and CI.
-4. Label simulated modules in the UI itself, not just in this README.
+1. Bind real crewAI tools to the studio's tool picker (currently unbound, warned).
+2. Persist runs in SQLite so history survives a restart.
+3. Split `server.ts` into route modules; split the largest components.
+4. Add a test suite (currently none) and CI.
+5. Remove the remaining panels in `CrewStudio` that still call removed endpoints
+   (`PredictiveSchedulerModule`, `AutonomyStrategyDashboard`, PR-review module).
 
 ## License
 
