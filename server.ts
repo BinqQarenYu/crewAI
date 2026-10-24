@@ -4658,7 +4658,12 @@ Objective: "${baseGoal}"`;
 
 // Vite Middleware in Dev or Static in Production
 async function startServer() {
-  syncStandaloneBatFilesOnDisk();
+  try {
+    syncStandaloneBatFilesOnDisk();
+  } catch {
+    // Ignore non-fatal standalone script sync errors
+  }
+
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
     app.use((req, res) => {
@@ -4667,7 +4672,15 @@ async function startServer() {
   } else {
     const { createServer } = await import('vite');
     const vite = await createServer({
-      server: { middlewareMode: true, host: '0.0.0.0', port: PORT },
+      server: {
+        middlewareMode: true,
+        host: '0.0.0.0',
+        port: PORT,
+        hmr: false,
+        watch: {
+          ignored: ['**/.pro-mode-state.json', '**/*.bat', '**/dist/**']
+        }
+      },
       appType: 'spa'
     });
     app.use(vite.middlewares);
