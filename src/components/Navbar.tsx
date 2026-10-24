@@ -72,60 +72,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [storageKb, setStorageKb] = useState<number>(0);
   const [heapMb, setHeapMb] = useState<number | null>(null);
   const [trimNotice, setTrimNotice] = useState<string | null>(null);
-  const [proStatus, setProStatus] = useState<{
-    isActive: boolean;
-    isPaused: boolean;
-    currentStepNumber: number;
-    currentVersion: string;
-  }>({
-    isActive: true,
-    isPaused: false,
-    currentStepNumber: 5,
-    currentVersion: 'v1.2.0'
-  });
   const throttlerMetrics = useTaskThrottlerMetrics(showRuntimeDrawer);
   const drawerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const syncProHeartbeat = async () => {
-      try {
-        const res = await fetch('/api/pro/status');
-        if (res.ok) {
-          const data = await res.json();
-          setProStatus({
-            isActive: Boolean(data.isActive),
-            isPaused: Boolean(data.isPaused),
-            currentStepNumber: Number(data.currentStepNumber || 5),
-            currentVersion: String(data.currentVersion || 'v1.2.0')
-          });
-        }
-      } catch {
-        // ignore transient network errors
-      }
-    };
-
-    const handleProStatusEvent = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail && typeof detail === 'object') {
-        setProStatus({
-          isActive: Boolean(detail.isActive),
-          isPaused: Boolean(detail.isPaused),
-          currentStepNumber: Number(detail.currentStepNumber || 5),
-          currentVersion: String(detail.currentVersion || 'v1.2.0')
-        });
-      } else {
-        syncProHeartbeat();
-      }
-    };
-
-    syncProHeartbeat();
-    const interval = setInterval(syncProHeartbeat, 15000);
-    window.addEventListener('crewai:pro-status-updated', handleProStatusEvent);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('crewai:pro-status-updated', handleProStatusEvent);
-    };
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -506,23 +454,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                      {onOpenJules && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowRuntimeDrawer(false);
-                            onOpenJules();
-                          }}
-                          className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
-                        >
-                          <Cpu className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                          <div>
-                            <div className="font-semibold text-white">Google Jules VM</div>
-                            <div className="text-[10px] text-slate-400">Cloud sandbox & PRs</div>
-                          </div>
-                        </button>
-                      )}
-
                       <button
                         type="button"
                         onClick={() => {
@@ -551,23 +482,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <div>
                             <div className="font-semibold text-white">API Diagnostics</div>
                             <div className="text-[10px] text-slate-400">Live latency probes</div>
-                          </div>
-                        </button>
-                      )}
-
-                      {onOpenRemoteScan && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowRuntimeDrawer(false);
-                            onOpenRemoteScan();
-                          }}
-                          className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-start gap-2"
-                        >
-                          <QrCode className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
-                          <div>
-                            <div className="font-semibold text-white">Remote QR Scan</div>
-                            <div className="text-[10px] text-slate-400">Mobile control deck</div>
                           </div>
                         </button>
                       )}
@@ -728,42 +642,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               selectedBranch={selectedBranch}
               onNavigateToGitHub={() => onTabChange('github')}
             />
-
-            {/* One-Click PRO Mode (24h Autonomous Lifecycle) CTA with Subtle Heartbeat Pulse */}
-            {onOpenProMode && (
-              <button
-                type="button"
-                onClick={onOpenProMode}
-                title={
-                  proStatus.isActive && !proStatus.isPaused
-                    ? `PRO 24h Autonomous Job Active — Step ${proStatus.currentStepNumber}/10 (${proStatus.currentVersion})`
-                    : proStatus.isPaused
-                    ? `PRO 24h Autonomous Job Paused at Step ${proStatus.currentStepNumber}/10`
-                    : 'Open PRO Mode: 10-Step 24-Hour Autonomous Software Evolution'
-                }
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/95 hover:bg-slate-800 text-white border border-slate-700/90 hover:border-[#EB6658]/60 text-xs font-bold shadow-sm transition cursor-pointer whitespace-nowrap"
-              >
-                <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
-                  {proStatus.isActive && !proStatus.isPaused ? (
-                    <>
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-                    </>
-                  ) : (
-                    <span
-                      className={`relative inline-flex rounded-full h-2 w-2 ${
-                        proStatus.isPaused ? 'bg-amber-400' : 'bg-slate-500'
-                      }`}
-                    />
-                  )}
-                </span>
-                <Zap className="w-3.5 h-3.5 text-[#EB6658]" />
-                <span>PRO 24h</span>
-                <span className="hidden sm:inline font-mono text-[10px] font-semibold text-slate-400 tabular-nums">
-                  S{proStatus.currentStepNumber}/10
-                </span>
-              </button>
-            )}
 
             {/* Primary CTA: One-Click Push App to GitHub */}
             <button

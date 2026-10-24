@@ -15,10 +15,7 @@ import { SearchModal } from './components/SearchModal';
 import { AgentPromptModal } from './components/AgentPromptModal';
 import { OllamaPoolModal } from './components/OllamaPoolModal';
 import { GitHubHub } from './components/GitHubHub';
-import { JulesAgentModal } from './components/JulesAgentModal';
 import { ApiDiagnosticsModal } from './components/ApiDiagnosticsModal';
-import { AntigravityRemoteScanModal } from './components/AntigravityRemoteScanModal';
-import { ProModeModal } from './components/ProModeModal';
 import { GlobalCardMinMaxEnhancer } from './components/CardMinMaxControl';
 import { globalTaskThrottler } from './utils/taskThrottler';
 
@@ -336,42 +333,9 @@ export const App: React.FC = () => {
         onSelectPoolModel={() => setCurrentTab('studio')}
       />
 
-      <JulesAgentModal
-        isOpen={isJulesOpen}
-        onClose={() => setIsJulesOpen(false)}
-        context={julesContext}
-        selectedRepo={selectedRepo}
-        selectedBranch={selectedBranch}
-      />
-
       <ApiDiagnosticsModal
         isOpen={isDiagnosticsOpen}
         onClose={() => setIsDiagnosticsOpen(false)}
-      />
-
-      <AntigravityRemoteScanModal
-        isOpen={isRemoteScanOpen}
-        onClose={() => setIsRemoteScanOpen(false)}
-        currentTab={currentTab}
-        onTabChange={(tab) => setCurrentTab(tab)}
-        selectedRepo={selectedRepo}
-        selectedBranch={selectedBranch}
-        initialMode={remoteScanInitialMode}
-      />
-
-      <ProModeModal
-        isOpen={isProModeOpen}
-        onClose={() => setIsProModeOpen(false)}
-        selectedRepo={selectedRepo}
-        selectedBranch={selectedBranch}
-        onRepoChange={(repo) => {
-          setSelectedRepo(repo);
-          localStorage.setItem('crewai_selected_repo', repo);
-        }}
-        onBranchChange={(branch) => {
-          setSelectedBranch(branch);
-          localStorage.setItem('crewai_selected_branch', branch);
-        }}
       />
 
       <GlobalCardMinMaxEnhancer />
