@@ -6,6 +6,7 @@ import zlib from 'zlib';
 import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from "@google/genai";
+import { registerCrewRunner } from './server/crewRunner.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4898,6 +4899,10 @@ async function startServer() {
   } catch {
     // Ignore non-fatal standalone script sync errors
   }
+
+  // Real crew execution (Python runner + SSE). Registered before the static
+  // handlers so /api/runs/* is never swallowed by the SPA fallback.
+  registerCrewRunner(app);
 
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, 'dist')));
