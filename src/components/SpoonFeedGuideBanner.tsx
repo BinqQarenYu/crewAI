@@ -44,15 +44,15 @@ export const SPOON_FEED_STEPS: SpoonFeedStepMeta[] = [
   },
   {
     step: 2,
-    shortLabel: '2. Name & Team Mode',
-    actionTag: '✏️ CLICK & DO THIS',
-    title: 'Step 2: Name Your Project & Choose How Your AI Team Works',
+    shortLabel: '2 & 2.1. Name & Pull Target',
+    actionTag: '✏️ CLICK & PULL TARGET (2.1)',
+    title: 'Step 2 & 2.1: Name Your Project, Pull Project Target (2.1) & Choose Team Mode',
     plainEnglish:
-      'Every project needs a name and a teamwork style ("Process Mode"). You only need to know two simple styles:',
+      'Every project needs a name, a pulled target repository (Step 2.1), and a teamwork style ("Process Mode"):',
     whatToClick: [
       'Type your project name in the "Project / Crew Name" box directly below this bubble.',
-      'Click "Sequential" (Recommended for beginners!) so Worker #1 finishes their job and hands it off to Worker #2 like an assembly line.',
-      'Or click "Hierarchical" if you want a "Boss AI" (Manager) to assign tasks and review everyone\'s work.'
+      'Step 2.1: Click "2.1 Pull Project Target" to pull the target repository tree, commits, and AST into your workspace.',
+      'Click "Sequential" (Recommended!) or "Hierarchical" to choose how your AI team collaborates.'
     ]
   },
   {
