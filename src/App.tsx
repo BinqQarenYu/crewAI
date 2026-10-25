@@ -196,6 +196,14 @@ export const App: React.FC = () => {
         onTabChange={(tab) => setCurrentTab(tab)}
         selectedRepo={selectedRepo}
         selectedBranch={selectedBranch}
+        onRepoChange={(repo) => {
+          setSelectedRepo(repo);
+          localStorage.setItem('crewai_selected_repo', repo);
+        }}
+        onBranchChange={(branch) => {
+          setSelectedBranch(branch);
+          localStorage.setItem('crewai_selected_branch', branch);
+        }}
         flowSubView={flowSubView}
         onSelectFlowSubView={(sub) => setFlowSubView(sub)}
       />

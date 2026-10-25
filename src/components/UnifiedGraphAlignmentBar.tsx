@@ -17,12 +17,15 @@ import {
   buildAlignedFlowStepsFromCrew,
   broadcastWorkflowSync
 } from '../utils/unifiedGraphEngine';
+import { TargetRepoSelector } from './TargetRepoSelector';
 
 interface UnifiedGraphAlignmentBarProps {
   currentTab: DocTab;
   onTabChange: (tab: DocTab) => void;
   selectedRepo: string;
   selectedBranch: string;
+  onRepoChange?: (repo: string) => void;
+  onBranchChange?: (branch: string) => void;
   flowSubView?: 'flow_dag' | 'graphify_repo';
   onSelectFlowSubView?: (view: 'flow_dag' | 'graphify_repo') => void;
 }
@@ -32,6 +35,8 @@ export const UnifiedGraphAlignmentBar: React.FC<UnifiedGraphAlignmentBarProps> =
   onTabChange,
   selectedRepo,
   selectedBranch,
+  onRepoChange,
+  onBranchChange,
   flowSubView = 'graphify_repo',
   onSelectFlowSubView
 }) => {
@@ -140,11 +145,22 @@ export const UnifiedGraphAlignmentBar: React.FC<UnifiedGraphAlignmentBarProps> =
             <span className="font-semibold text-white whitespace-nowrap">
               Unified 4-Graph Architecture
             </span>
-            <span className="text-slate-600" aria-hidden="true">·</span>
+          </div>
+
+          {onRepoChange ? (
+            <TargetRepoSelector
+              selectedRepo={selectedRepo}
+              selectedBranch={selectedBranch}
+              onSelectRepo={onRepoChange}
+              onSelectBranch={onBranchChange}
+              variant="inline"
+              label="Target Repository"
+            />
+          ) : (
             <span className="text-slate-400 font-mono text-[11px] tabular-nums whitespace-nowrap">
               {selectedRepo}@{selectedBranch}
             </span>
-          </div>
+          )}
 
           <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1 text-xs">
             <Sliders className="w-3.5 h-3.5 text-[#EB6658] shrink-0" />

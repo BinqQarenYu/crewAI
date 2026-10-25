@@ -34,6 +34,8 @@ import {
   validateAutonomousGoal
 } from '../utils/constitutionalValidator';
 import { ConstitutionalImpactAnalysis } from './ConstitutionalImpactAnalysis';
+import { CodebaseConstitutionalWatcher } from './CodebaseConstitutionalWatcher';
+import { TargetRepoSelector } from './TargetRepoSelector';
 
 
 
@@ -149,6 +151,7 @@ interface ProDashboardProps {
     probeOllama?: boolean;
   }) => void;
   onOpenConstitutionalAudit?: (goalPrompt?: string) => void;
+  onSelectTargetProject?: (repo: string, branch: string) => void;
   isAdvancing?: boolean;
   isFormulating?: boolean;
 }
@@ -244,6 +247,7 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
   onFormulateFromAudit,
   onUpdateCreditGovernor,
   onOpenConstitutionalAudit,
+  onSelectTargetProject,
   isAdvancing = false,
   isFormulating = false
 }) => {
@@ -562,6 +566,45 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Interactive Target Repository & Project Loader Bar */}
+      <div className="bg-slate-900/75 border border-slate-800 rounded-xl p-4 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-mono text-[#EB6658] uppercase tracking-wider">
+              STEP 2 · TARGET REPOSITORY &amp; ACTIVE PROJECT LOADER
+            </div>
+            <h3 className="text-sm font-bold text-white mt-0.5">
+              Target Repository: Select &amp; Load Project for 24-Hour Autonomous Evolution
+            </h3>
+          </div>
+          <span className="text-xs font-mono text-slate-400 tabular-nums">
+            Active Project: <strong className="text-white">{proState.selectedRepo}</strong> · Branch:{' '}
+            <strong className="text-sky-300">{proState.targetBranch}</strong>
+          </span>
+        </div>
+
+        <TargetRepoSelector
+          selectedRepo={proState.selectedRepo}
+          selectedBranch={proState.targetBranch || 'main'}
+          onSelectRepo={(repo) =>
+            onSelectTargetProject?.(repo, proState.targetBranch || 'main')
+          }
+          onSelectBranch={(branch) =>
+            onSelectTargetProject?.(proState.selectedRepo, branch)
+          }
+          onProjectLoaded={(repo, branch) => onSelectTargetProject?.(repo, branch)}
+          variant="banner"
+          label="Target Repository"
+        />
+      </div>
+
+      {/* Automated Periodic Codebase Constitutional Drift Watcher & Notification System */}
+      <CodebaseConstitutionalWatcher
+        selectedRepo={proState.selectedRepo}
+        targetBranch={proState.targetBranch}
+        onOpenConstitutionalAudit={onOpenConstitutionalAudit}
+      />
 
 
       {/* Patient "Time-in-the-World" Gemini Credit Governor & Conditional Ollama Fallback Strip */}

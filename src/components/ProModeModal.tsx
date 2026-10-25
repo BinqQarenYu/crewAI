@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { CURATED_TARGET_REPOS } from '../utils/repoWorkforceMapping';
 import { ProDashboard } from './ProDashboard';
+import { TargetRepoSelector } from './TargetRepoSelector';
 import {
   evaluateConstitutionalRisk,
   type ConstitutionalRiskAssessment
@@ -328,10 +329,10 @@ function useProGoalConstitutionalScan(params: {
 }
 
 export const ProModeModal: React.FC<ProModeModalProps> = ({
-
   isOpen,
   onClose,
   selectedRepo,
+  selectedBranch,
   onRepoChange,
   onBranchChange,
   onOpenConstitutionalAudit
@@ -443,6 +444,37 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         setStatusBanner('GitHub PAT verified and connected to Pro Mode Autopilot.');
         setTimeout(() => setStatusBanner(null), 3500);
         fetchProStatus();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectAndLoadProject = async (nextRepo: string, nextBranch?: string) => {
+    const cleanRepo = (nextRepo || '').trim() || 'bingkltech/crewAI';
+    const cleanBranch = (nextBranch || selectedBranch || 'main').trim();
+    setRepoInput(cleanRepo);
+    onRepoChange(cleanRepo);
+    onBranchChange(cleanBranch);
+    try {
+      const res = await fetch('/api/pro/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedRepo: cleanRepo,
+          primaryGoal: goalInput,
+          branchPolicy,
+          cooldownSeconds
+        })
+      });
+      if (res.ok) {
+        const data: ProModeJobState = await res.json();
+        setProState(data);
+        window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data }));
+        setStatusBanner(
+          `Loaded Target Project ${cleanRepo}@${cleanBranch} into Pro Mode & 24-Hour Autonomous Lifecycle.`
+        );
+        setTimeout(() => setStatusBanner(null), 4000);
       }
     } catch {
       // ignore
@@ -782,6 +814,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               onFormulateFromAudit={() => handleFormulateGoal(true)}
               onUpdateCreditGovernor={handleUpdateCreditGovernor}
               onOpenConstitutionalAudit={onOpenConstitutionalAudit}
+              onSelectTargetProject={handleSelectAndLoadProject}
               isAdvancing={isAdvancing}
               isFormulating={isFormulating}
             />
@@ -909,36 +942,17 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               {/* Step 2: Project & Branch Policy */}
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    2. Select Target Repository
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    2. Select &amp; Load Target Repository Project
                   </label>
-                  <select
-                    aria-label="Select Target Repository"
-                    value={
-                      CURATED_TARGET_REPOS.some((r) => r.displayRepo === repoInput)
-                        ? repoInput
-                        : 'custom'
-                    }
-                    onChange={(e) => {
-                      if (e.target.value !== 'custom') {
-                        setRepoInput(e.target.value);
-                      }
-                    }}
-                    className="w-full bg-slate-950 text-xs text-slate-100 px-3 py-2 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658] mb-2"
-                  >
-                    {CURATED_TARGET_REPOS.map((r) => (
-                      <option key={r.displayRepo} value={r.displayRepo}>
-                        {r.displayRepo} — {r.label}
-                      </option>
-                    ))}
-                    <option value="custom">Custom GitHub Repository (owner/repo)</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={repoInput}
-                    onChange={(e) => setRepoInput(e.target.value)}
-                    placeholder="owner/repository"
-                    className="w-full bg-slate-950 text-xs font-mono text-slate-200 px-3 py-1.5 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658]"
+                  <TargetRepoSelector
+                    selectedRepo={repoInput}
+                    selectedBranch={selectedBranch || 'main'}
+                    onSelectRepo={(repo) => handleSelectAndLoadProject(repo, selectedBranch)}
+                    onSelectBranch={(branch) => handleSelectAndLoadProject(repoInput, branch)}
+                    onProjectLoaded={(repo, branch) => handleSelectAndLoadProject(repo, branch)}
+                    variant="banner"
+                    label="Target Repository"
                   />
                 </div>
 

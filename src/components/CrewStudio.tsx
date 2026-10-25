@@ -58,6 +58,7 @@ import { SpoonFeedTopBar, ContextualGuideBubble, SpoonFeedStep } from './SpoonFe
 import { CardMinMaxButtons } from './CardMinMaxControl';
 import { CrewExecutionProgressBar, LiveTaskExecutionItem, LiveTaskExecStatus } from './CrewExecutionProgressBar';
 import { TaskDependencyGraphVisualizer } from './TaskDependencyGraphVisualizer';
+import { TargetRepoSelector } from './TargetRepoSelector';
 import { CURATED_TARGET_REPOS, resolveRepoWorkforceProfile } from '../utils/repoWorkforceMapping';
 import { emitJulesPrNotification } from '../utils/prNotifications';
 import { globalTaskThrottler } from '../utils/taskThrottler';
@@ -3142,6 +3143,31 @@ if __name__ == "__main__":
               title="Target Repository Workforce Assignment"
             />
           </div>
+        </div>
+
+        {/* Direct Target Repository Project Selector & Loader */}
+        <div className="pt-2 border-t border-slate-800/80">
+          <TargetRepoSelector
+            selectedRepo={selectedRepo}
+            selectedBranch={selectedBranch}
+            onSelectRepo={(repo) => onRepoChange?.(repo)}
+            onSelectBranch={(branch) => onBranchChange?.(branch)}
+            onProjectLoaded={(repo, branch) => {
+              onRepoChange?.(repo);
+              onBranchChange?.(branch);
+              const nextProfile = resolveRepoWorkforceProfile(repo);
+              if (autoSyncRepoCrew) {
+                handleSelectPreset(nextProfile.presetKey);
+                setRunInput(nextProfile.recommendedTopic);
+              }
+              showNotification(
+                'success',
+                `Loaded Project ${repo}@${branch} (${nextProfile.crewName})`
+              );
+            }}
+            variant="banner"
+            label="Target Repository"
+          />
         </div>
 
         {!isRepoWorkforceMinimized && (
