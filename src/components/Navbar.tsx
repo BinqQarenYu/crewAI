@@ -121,6 +121,27 @@ export const Navbar: React.FC<NavbarProps> = ({
           currentStepNumber: Number(detail.currentStepNumber || 5),
           currentVersion: String(detail.currentVersion || 'v1.2.0')
         });
+        if (
+          (detail.currentStepNumber === 9 || detail.currentStepNumber === 10) &&
+          detail.lastStep9Push
+        ) {
+          const p = detail.lastStep9Push;
+          if (p.success) {
+            setPushBanner({
+              type: 'success',
+              text: `Step ${detail.currentStepNumber} Verified Push: Pushed ${p.filesPushed || 58} files to ${p.repo}@${p.branch}${
+                p.defaultBranchSynced ? ` (+ ${p.defaultBranchSynced})` : ''
+              } (Commit ${p.shortSha})`,
+              commitUrl: p.commitUrl,
+              repoUrl: p.repoUrl
+            });
+          } else if (p.error) {
+            setPushBanner({
+              type: 'error',
+              text: `Step ${detail.currentStepNumber} GitHub Push: ${p.error}`
+            });
+          }
+        }
       } else {
         syncProHeartbeat();
       }
@@ -238,7 +259,22 @@ export const Navbar: React.FC<NavbarProps> = ({
     return '';
   };
 
-  const handlePushEntireApp = async (overrideToken?: string, isAutoTrigger = false) => {
+  const latestRepoBranchRef = useRef<{ repo: string; branch: string }>({
+    repo: selectedRepo || 'bingkltech/crewAI',
+    branch: selectedBranch || 'main'
+  });
+  useEffect(() => {
+    latestRepoBranchRef.current = {
+      repo: selectedRepo || localStorage.getItem('crewai_selected_repo') || 'bingkltech/crewAI',
+      branch: selectedBranch || localStorage.getItem('crewai_selected_branch') || 'main'
+    };
+  }, [selectedRepo, selectedBranch]);
+
+  const handlePushEntireApp = async (
+    overrideToken?: string,
+    isAutoTrigger = false,
+    overrideTarget?: { repo?: string; branch?: string }
+  ) => {
     if (isPushingApp) return;
     const backupEnv = localStorage.getItem('crewai_saved_dotenv_backup') || '';
     const token =
@@ -247,10 +283,21 @@ export const Navbar: React.FC<NavbarProps> = ({
         extractPatFromBackupEnv(backupEnv) ||
         '').trim();
 
+    const activeRepo =
+      overrideTarget?.repo ||
+      latestRepoBranchRef.current.repo ||
+      localStorage.getItem('crewai_selected_repo') ||
+      'bingkltech/crewAI';
+    const activeBranch =
+      overrideTarget?.branch ||
+      latestRepoBranchRef.current.branch ||
+      localStorage.getItem('crewai_selected_branch') ||
+      'main';
+
     setIsPushingApp(true);
     setPushBanner({
       type: 'info',
-      text: `Auto-using saved GitHub PAT to push full CrewAI Studio workspace (${selectedRepo || 'bingkltech/crewAI'}@${selectedBranch || 'main'})...`
+      text: `Auto-using saved GitHub PAT to push full CrewAI Studio workspace (${activeRepo}@${activeBranch})...`
     });
 
     try {
@@ -283,9 +330,9 @@ export const Navbar: React.FC<NavbarProps> = ({
         },
         body: JSON.stringify({
           token: token || undefined,
-          repo: selectedRepo || 'bingkltech/crewAI',
-          branch: selectedBranch || 'main',
-          message: 'feat(pro-mode): add 24h Pro Mode Autopilot, ProDashboard telemetry & Navbar heartbeat',
+          repo: activeRepo,
+          branch: activeBranch,
+          message: 'feat(pro-mode): push verified CrewAI Studio workspace & autonomous lifecycle state',
           extraFiles
         })
       });
@@ -303,7 +350,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         setPatUserLogin(data.userLogin);
         localStorage.setItem('crewai_github_user_login', data.userLogin);
       }
-      if (data.repo && data.repo !== selectedRepo) {
+      if (data.repo && data.repo !== activeRepo) {
         localStorage.setItem('crewai_selected_repo', data.repo);
       }
 
@@ -311,7 +358,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       setPushBanner({
         type: 'success',
-        text: `Auto-pushed ${data.filesPushed || 57} app files using saved PAT to ${data.repo}@${data.branch} (Commit ${data.shortSha})`,
+        text: `Auto-pushed ${data.filesPushed || 58} app files using saved PAT to ${data.repo}@${data.branch}${
+          data.defaultBranchSynced ? ` (+ ${data.defaultBranchSynced})` : ''
+        } (Commit ${data.shortSha})`,
         commitUrl: data.commitUrl,
         repoUrl: data.repoUrl
       });
@@ -394,8 +443,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
 
     syncPatStatus();
-    const handleTriggerPushApp = () => {
-      handlePushEntireApp();
+    const handleTriggerPushApp = (e: Event) => {
+      const detail = (e as CustomEvent<{ repo?: string; branch?: string }>).detail;
+      handlePushEntireApp(undefined, false, detail);
     };
     window.addEventListener('github-pat-updated', syncPatStatus);
     window.addEventListener('crewai:push-entire-app', handleTriggerPushApp);

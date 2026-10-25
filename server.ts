@@ -1115,6 +1115,7 @@ function collectWorkspaceAppFiles(
   };
 
   walkDir('src');
+  walkDir('server');
 
   if (Array.isArray(extraFiles)) {
     for (const ef of extraFiles) {
@@ -1418,25 +1419,66 @@ app.post('/api/ai/suggest-task', async (req, res) => {
   }
 });
 
-// Atomic Full-App Push to GitHub via PAT (Git Trees & Commits API)
-app.post('/api/github/push-app', async (req, res) => {
+interface FullAppPushOptions {
+  token?: string;
+  repo?: string;
+  branch?: string;
+  message?: string;
+  extraFiles?: Array<{ path: string; content: string }>;
+  alsoSyncDefaultBranch?: boolean;
+}
+
+interface FullAppPushResult {
+  success: boolean;
+  status: number;
+  userLogin?: string;
+  repo: string;
+  branch: string;
+  defaultBranchSynced?: string | null;
+  filesPushed?: number;
+  filePaths?: string[];
+  commitSha?: string;
+  shortSha?: string;
+  commitUrl?: string;
+  repoUrl?: string;
+  orgPolicyFallbackReason?: string | null;
+  pushedAt: string;
+  error?: string;
+}
+
+function encodeGitRefBranchPath(branchName: string): string {
+  return String(branchName || 'main')
+    .trim()
+    .replace(/^refs\/heads\//, '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+async function executeFullAppGitHubPush(options: FullAppPushOptions): Promise<FullAppPushResult> {
   syncStandaloneBatFilesOnDisk();
   loadEnvWithOverride();
-  const {
-    token: clientToken,
-    repo: requestedRepoFull = 'bingkltech/crewAI',
-    branch: requestedBranch = 'main',
-    message = 'feat(app): push full CrewAI Studio application & multi-agent presets',
-    extraFiles = []
-  } = req.body || {};
 
-  const headerToken = req.headers.authorization?.split(' ')[1];
-  const token = (clientToken || headerToken || getGithubToken() || '').trim();
+  const requestedRepoFull = (options.repo || proModeState?.selectedRepo || 'bingkltech/crewAI').trim();
+  const requestedBranch = (options.branch || proModeState?.targetBranch || 'main').trim();
+  const message =
+    options.message ||
+    `feat(step-9-autopush): sync verified CrewAI Studio workspace (${requestedRepoFull}@${requestedBranch})`;
+  const extraFiles = Array.isArray(options.extraFiles) ? options.extraFiles : [];
+  const token = (options.token || getGithubToken() || '').trim();
+  const pushedAt = new Date().toISOString();
 
   if (!token) {
-    return res.status(400).json({
-      error: 'No GitHub Personal Access Token (PAT) found. Please connect your PAT in GitHub Hub or upload your .env file.'
-    });
+    return {
+      success: false,
+      status: 400,
+      repo: requestedRepoFull,
+      branch: requestedBranch,
+      pushedAt,
+      error:
+        'No GitHub Personal Access Token (PAT) found. Please connect your PAT in GitHub Hub or upload your .env file.'
+    };
   }
 
   // Persist valid token into runtime & .env
@@ -1455,8 +1497,8 @@ app.post('/api/github/push-app', async (req, res) => {
   }
 
   const ghHeaders = {
-    'Authorization': `Bearer ${token}`,
-    'Accept': 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
     'Content-Type': 'application/json'
   };
@@ -1466,11 +1508,16 @@ app.post('/api/github/push-app', async (req, res) => {
     const userRes = await fetch('https://api.github.com/user', { headers: ghHeaders });
     const userData: any = await userRes.json().catch(() => ({}));
     if (!userRes.ok || !userData?.login) {
-      return res.status(userRes.status || 401).json({
+      return {
+        success: false,
+        status: userRes.status || 401,
+        repo: requestedRepoFull,
+        branch: requestedBranch,
+        pushedAt,
         error: userData?.message
           ? `GitHub PAT authentication failed: ${userData.message}`
           : 'Invalid GitHub Personal Access Token'
-      });
+      };
     }
 
     const authLogin: string = userData.login;
@@ -1489,8 +1536,10 @@ app.post('/api/github/push-app', async (req, res) => {
 
     const canPushRequested = Boolean(
       repoRes.ok &&
-      repoData &&
-      (repoData.permissions?.push || repoData.permissions?.admin || targetOwner.toLowerCase() === authLogin.toLowerCase())
+        repoData &&
+        (repoData.permissions?.push ||
+          repoData.permissions?.admin ||
+          targetOwner.toLowerCase() === authLogin.toLowerCase())
     );
 
     // If user doesn't have push access to e.g. bingkltech/crewAI, automatically resolve or create <authLogin>/<targetRepo>
@@ -1513,16 +1562,23 @@ app.post('/api/github/push-app', async (req, res) => {
           headers: ghHeaders,
           body: JSON.stringify({
             name: targetRepo,
-            description: 'CrewAI Studio — Full-Stack Multi-Agent Orchestration, LangGraph & Autonomous DevOps IDE',
+            description:
+              'CrewAI Studio — Full-Stack Multi-Agent Orchestration, LangGraph & Autonomous DevOps IDE',
             private: false,
             auto_init: true
           })
         });
         repoData = await createRes.json().catch(() => ({}));
         if (!createRes.ok && createRes.status !== 422) {
-          return res.status(createRes.status).json({
-            error: repoData?.message || `Could not create or access repository ${targetOwner}/${targetRepo}`
-          });
+          return {
+            success: false,
+            status: createRes.status,
+            repo: `${targetOwner}/${targetRepo}`,
+            branch: requestedBranch,
+            pushedAt,
+            error:
+              repoData?.message || `Could not create or access repository ${targetOwner}/${targetRepo}`
+          };
         }
         // Re-fetch repo metadata after creation
         const refetchRes = await fetch(`https://api.github.com/repos/${targetOwner}/${targetRepo}`, {
@@ -1534,23 +1590,29 @@ app.post('/api/github/push-app', async (req, res) => {
       }
     }
 
-    let targetBranch = requestedBranch || repoData?.default_branch || 'main';
+    const defaultBranch: string = repoData?.default_branch || 'main';
+    const targetBranch: string = requestedBranch || defaultBranch;
+    const encodedTargetBranch = encodeGitRefBranchPath(targetBranch);
+    const encodedDefaultBranch = encodeGitRefBranchPath(defaultBranch);
 
-    // 3. Resolve latest commit SHA & base tree on targetBranch (or default_branch)
+    // 3. Check if targetBranch already exists on remote; if not, resolve base commit from defaultBranch
+    let targetBranchExists = true;
     let refRes = await fetch(
-      `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/ref/heads/${encodeURIComponent(targetBranch)}`,
+      `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/ref/heads/${encodedTargetBranch}`,
       { headers: ghHeaders }
     );
 
-    if (!refRes.ok && repoData?.default_branch && repoData.default_branch !== targetBranch) {
-      targetBranch = repoData.default_branch;
-      refRes = await fetch(
-        `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/ref/heads/${encodeURIComponent(targetBranch)}`,
-        { headers: ghHeaders }
-      );
+    if (!refRes.ok) {
+      targetBranchExists = false;
+      if (defaultBranch !== targetBranch) {
+        refRes = await fetch(
+          `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/ref/heads/${encodedDefaultBranch}`,
+          { headers: ghHeaders }
+        );
+      }
     }
 
-    // If repository is completely empty (no initial commit yet), bootstrap README.md via Contents API
+    // If repository is completely empty (no initial commit yet), bootstrap README.md via Contents API on defaultBranch
     if (!refRes.ok) {
       const initContent = Buffer.from(
         `# ${targetRepo}\n\nPushed from CrewAI Studio Full-Stack Multi-Agent IDE.\n`
@@ -1561,20 +1623,30 @@ app.post('/api/github/push-app', async (req, res) => {
         body: JSON.stringify({
           message: 'chore: initialize repository',
           content: initContent,
-          branch: targetBranch
+          branch: defaultBranch
         })
       });
       refRes = await fetch(
-        `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/ref/heads/${encodeURIComponent(targetBranch)}`,
+        `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/ref/heads/${encodedDefaultBranch}`,
         { headers: ghHeaders }
       );
+      if (targetBranch === defaultBranch && refRes.ok) {
+        targetBranchExists = true;
+      }
     }
 
     if (!refRes.ok) {
       const refErr: any = await refRes.json().catch(() => ({}));
-      return res.status(refRes.status).json({
-        error: refErr?.message || `Failed to resolve branch reference heads/${targetBranch} on ${targetOwner}/${targetRepo}`
-      });
+      return {
+        success: false,
+        status: refRes.status,
+        repo: `${targetOwner}/${targetRepo}`,
+        branch: targetBranch,
+        pushedAt,
+        error:
+          refErr?.message ||
+          `Failed to resolve base branch reference on ${targetOwner}/${targetRepo}`
+      };
     }
 
     const refData: any = await refRes.json();
@@ -1614,9 +1686,14 @@ app.post('/api/github/push-app', async (req, res) => {
 
     const treeData: any = await treeCreateRes.json().catch(() => ({}));
     if (!treeCreateRes.ok || !treeData?.sha) {
-      return res.status(treeCreateRes.status || 500).json({
+      return {
+        success: false,
+        status: treeCreateRes.status || 500,
+        repo: `${targetOwner}/${targetRepo}`,
+        branch: targetBranch,
+        pushedAt,
         error: treeData?.message || 'Failed to create Git tree for application files'
-      });
+      };
     }
 
     // 6. Create Git Commit
@@ -1635,29 +1712,92 @@ app.post('/api/github/push-app', async (req, res) => {
 
     const newCommitData: any = await newCommitRes.json().catch(() => ({}));
     if (!newCommitRes.ok || !newCommitData?.sha) {
-      return res.status(newCommitRes.status || 500).json({
+      return {
+        success: false,
+        status: newCommitRes.status || 500,
+        repo: `${targetOwner}/${targetRepo}`,
+        branch: targetBranch,
+        pushedAt,
         error: newCommitData?.message || 'Failed to create Git commit'
-      });
+      };
     }
 
-    // 7. Update branch reference to point to new commit
-    const updateRefRes = await fetch(
-      `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/refs/heads/${encodeURIComponent(targetBranch)}`,
-      {
-        method: 'PATCH',
-        headers: ghHeaders,
-        body: JSON.stringify({
-          sha: newCommitData.sha,
-          force: true
-        })
+    // 7. Update existing targetBranch ref OR create new branch ref if targetBranch didn't exist yet
+    let updateRefRes: Response;
+    if (targetBranchExists) {
+      updateRefRes = await fetch(
+        `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/refs/heads/${encodedTargetBranch}`,
+        {
+          method: 'PATCH',
+          headers: ghHeaders,
+          body: JSON.stringify({
+            sha: newCommitData.sha,
+            force: true
+          })
+        }
+      );
+    } else {
+      updateRefRes = await fetch(
+        `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/refs`,
+        {
+          method: 'POST',
+          headers: ghHeaders,
+          body: JSON.stringify({
+            ref: `refs/heads/${targetBranch}`,
+            sha: newCommitData.sha
+          })
+        }
+      );
+      // If branch was created concurrently, fall back to PATCH
+      if (!updateRefRes.ok && updateRefRes.status === 422) {
+        updateRefRes = await fetch(
+          `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/refs/heads/${encodedTargetBranch}`,
+          {
+            method: 'PATCH',
+            headers: ghHeaders,
+            body: JSON.stringify({
+              sha: newCommitData.sha,
+              force: true
+            })
+          }
+        );
       }
-    );
+    }
 
     if (!updateRefRes.ok) {
       const updateErr: any = await updateRefRes.json().catch(() => ({}));
-      return res.status(updateRefRes.status).json({
+      return {
+        success: false,
+        status: updateRefRes.status,
+        repo: `${targetOwner}/${targetRepo}`,
+        branch: targetBranch,
+        pushedAt,
         error: updateErr?.message || `Failed to update branch ${targetBranch} with new commit`
-      });
+      };
+    }
+
+    // Also keep the repository's default branch (e.g. main) synchronized when pushing to an autonomous branch
+    // so visiting the repository root on GitHub immediately reflects the latest Step 9 push.
+    let defaultBranchSynced: string | null = null;
+    if (options.alsoSyncDefaultBranch !== false && defaultBranch && defaultBranch !== targetBranch) {
+      try {
+        const syncDefaultRes = await fetch(
+          `https://api.github.com/repos/${targetOwner}/${targetRepo}/git/refs/heads/${encodedDefaultBranch}`,
+          {
+            method: 'PATCH',
+            headers: ghHeaders,
+            body: JSON.stringify({
+              sha: newCommitData.sha,
+              force: true
+            })
+          }
+        );
+        if (syncDefaultRes.ok) {
+          defaultBranchSynced = defaultBranch;
+        }
+      } catch {
+        // non-fatal
+      }
     }
 
     const finalRepoFull = `${targetOwner}/${targetRepo}`;
@@ -1665,24 +1805,79 @@ app.post('/api/github/push-app', async (req, res) => {
     const commitUrl =
       newCommitData.html_url || `https://github.com/${finalRepoFull}/commit/${newCommitData.sha}`;
 
-    res.json({
+    return {
       success: true,
+      status: 200,
       userLogin: authLogin,
       repo: finalRepoFull,
       branch: targetBranch,
+      defaultBranchSynced,
       filesPushed: appFiles.length,
       filePaths: appFiles.map((f) => f.path),
       commitSha: newCommitData.sha,
       shortSha,
       commitUrl,
-      repoUrl: `https://github.com/${finalRepoFull}/tree/${encodeURIComponent(targetBranch)}`,
-      orgPolicyFallbackReason
-    });
+      repoUrl: `https://github.com/${finalRepoFull}/tree/${encodedTargetBranch}`,
+      orgPolicyFallbackReason,
+      pushedAt
+    };
   } catch (error: any) {
-    res.status(500).json({
+    return {
+      success: false,
+      status: 500,
+      repo: requestedRepoFull,
+      branch: requestedBranch,
+      pushedAt,
       error: error.message || 'Failed to push application workspace to GitHub'
-    });
+    };
   }
+}
+
+// Atomic Full-App Push to GitHub via PAT (Git Trees & Commits API)
+app.post('/api/github/push-app', async (req, res) => {
+  const {
+    token: clientToken,
+    repo: requestedRepoFull = proModeState?.selectedRepo || 'bingkltech/crewAI',
+    branch: requestedBranch = proModeState?.targetBranch || 'main',
+    message = 'feat(app): push full CrewAI Studio application & multi-agent presets',
+    extraFiles = []
+  } = req.body || {};
+
+  const headerToken = req.headers.authorization?.split(' ')[1];
+  const token = (clientToken || headerToken || getGithubToken() || '').trim();
+
+  const result = await executeFullAppGitHubPush({
+    token,
+    repo: requestedRepoFull,
+    branch: requestedBranch,
+    message,
+    extraFiles,
+    alsoSyncDefaultBranch: true
+  });
+
+  if (!result.success) {
+    return res.status(result.status || 500).json({ error: result.error });
+  }
+
+  // Also record on proModeState so Step 9 status stays synchronized
+  proModeState.githubConnected = true;
+  proModeState.selectedRepo = result.repo;
+  proModeState.lastStep9Push = {
+    success: true,
+    repo: result.repo,
+    branch: result.branch,
+    defaultBranchSynced: result.defaultBranchSynced,
+    commitSha: result.commitSha,
+    shortSha: result.shortSha,
+    commitUrl: result.commitUrl,
+    repoUrl: result.repoUrl,
+    filesPushed: result.filesPushed,
+    pushedAt: result.pushedAt,
+    orgPolicyFallbackReason: result.orgPolicyFallbackReason
+  };
+  saveProModeStateToDisk(proModeState);
+
+  res.json(result);
 });
 
 app.get('/api/github/repository-health', async (req, res) => {
@@ -4437,6 +4632,20 @@ interface ProModeJobState {
     highlights: string;
     testsPassed: string;
   }>;
+  lastStep9Push?: {
+    success: boolean;
+    repo: string;
+    branch: string;
+    defaultBranchSynced?: string | null;
+    commitSha?: string;
+    shortSha?: string;
+    commitUrl?: string;
+    repoUrl?: string;
+    filesPushed?: number;
+    pushedAt: string;
+    orgPolicyFallbackReason?: string | null;
+    error?: string;
+  };
   updatedAt: string;
 }
 
@@ -5046,30 +5255,96 @@ app.post('/api/pro/advance-step', async (req, res) => {
   }
 
   if (nextStep === 9) {
-    // Step 9: Push & Update Repo — Auto-sync verified workspace to GitHub using saved PAT
-    proModeState.githubConnected = Boolean(getGithubToken());
+    // Step 9: Push & Update Repo — Execute REAL GitHub Git Trees & Commits API push on server via saved PAT
+    const requestedRepo = String(req.body?.selectedRepo || proModeState.selectedRepo || 'bingkltech/crewAI').trim();
+    const requestedBranch = String(req.body?.targetBranch || proModeState.targetBranch || 'main').trim();
+    const pushResult = await executeFullAppGitHubPush({
+      token: req.body?.token,
+      repo: requestedRepo,
+      branch: requestedBranch,
+      message: `feat(step-9-autopush): Cycle #${proModeState.evolutionCycleCount} verified workspace push (${proModeState.currentVersion})`,
+      alsoSyncDefaultBranch: true
+    });
+
+    proModeState.githubConnected = Boolean(getGithubToken()) || pushResult.success;
+    if (pushResult.success) {
+      proModeState.selectedRepo = pushResult.repo;
+      proModeState.targetBranch = pushResult.branch;
+    }
+    proModeState.lastStep9Push = {
+      success: pushResult.success,
+      repo: pushResult.repo,
+      branch: pushResult.branch,
+      defaultBranchSynced: pushResult.defaultBranchSynced,
+      commitSha: pushResult.commitSha,
+      shortSha: pushResult.shortSha,
+      commitUrl: pushResult.commitUrl,
+      repoUrl: pushResult.repoUrl,
+      filesPushed: pushResult.filesPushed,
+      pushedAt: pushResult.pushedAt,
+      orgPolicyFallbackReason: pushResult.orgPolicyFallbackReason,
+      error: pushResult.error
+    };
+
+    const pushSummaryLine = pushResult.success
+      ? `Step 9 Auto-Push Verified: Pushed ${pushResult.filesPushed} files to ${pushResult.repo}@${pushResult.branch}${
+          pushResult.defaultBranchSynced ? ` (+ synced ${pushResult.defaultBranchSynced})` : ''
+        } — Commit ${pushResult.shortSha}.`
+      : `Step 9 Auto-Push Alert: ${pushResult.error || 'Push failed'}`;
+
     proModeState.backwardAssessment = {
       ...proModeState.backwardAssessment,
       driftCorrectionsApplied: [
-        `Step 9 Auto-Push: Uploaded verified workspace to ${proModeState.selectedRepo} (${proModeState.targetBranch}) via saved GitHub PAT.`,
-        ...proModeState.backwardAssessment.driftCorrectionsApplied.slice(0, 2)
+        pushSummaryLine,
+        ...proModeState.backwardAssessment.driftCorrectionsApplied
+          .filter((item) => !item.startsWith('Step 9 Auto-Push'))
+          .slice(0, 2)
       ]
     };
   }
 
   if (nextStep === 10) {
-    // Step 10: End-But-Not-End — Bump semantic version & prepare transition back to Step 3
+    // Step 10: End-But-Not-End — Bump semantic version, push new release branch to GitHub, & prepare transition back to Step 3
     proModeState.evolutionCycleCount += 1;
     const parts = proModeState.currentVersion.replace(/^v/, '').split('.').map(Number);
     const nextMinor = (parts[1] || 3) + 1;
     const newVer = `v${parts[0] || 1}.${nextMinor}.0`;
     proModeState.currentVersion = newVer;
-    proModeState.targetBranch = `jules/autonomous-${newVer}`;
+    proModeState.targetBranch =
+      proModeState.branchPolicy === 'direct_main' ? 'main' : `jules/autonomous-${newVer}`;
+
+    const step10Push = await executeFullAppGitHubPush({
+      token: req.body?.token,
+      repo: proModeState.selectedRepo,
+      branch: proModeState.targetBranch,
+      message: `release(${newVer}): Step 10 End-But-Not-End Evolution Cycle #${proModeState.evolutionCycleCount}`,
+      alsoSyncDefaultBranch: true
+    });
+
+    if (step10Push.success) {
+      proModeState.selectedRepo = step10Push.repo;
+      proModeState.lastStep9Push = {
+        success: true,
+        repo: step10Push.repo,
+        branch: step10Push.branch,
+        defaultBranchSynced: step10Push.defaultBranchSynced,
+        commitSha: step10Push.commitSha,
+        shortSha: step10Push.shortSha,
+        commitUrl: step10Push.commitUrl,
+        repoUrl: step10Push.repoUrl,
+        filesPushed: step10Push.filesPushed,
+        pushedAt: step10Push.pushedAt,
+        orgPolicyFallbackReason: step10Push.orgPolicyFallbackReason
+      };
+    }
+
     proModeState.versionHistory.unshift({
       version: newVer,
       releasedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       branch: proModeState.targetBranch,
-      highlights: `Evolution Cycle #${proModeState.evolutionCycleCount}: Audit recommendations resolved under Patient Credit Governor & Immutable Constitution, Repo pushed (Step 9) & release promoted (Step 10 → loops to Step 3).`,
+      highlights: `Evolution Cycle #${proModeState.evolutionCycleCount}: Audit recommendations resolved under Patient Credit Governor & Immutable Constitution, Repo pushed (${
+        step10Push.shortSha ? `Commit ${step10Push.shortSha}` : 'Step 9'
+      }) & release promoted (Step 10 → loops to Step 3).`,
       testsPassed: `${50 + proModeState.evolutionCycleCount * 2}/${50 + proModeState.evolutionCycleCount * 2} Passed`
     });
     proModeState.versionHistory = proModeState.versionHistory.slice(0, 6);

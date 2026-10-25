@@ -815,15 +815,34 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
   const handleInlineProStepAdvance = async (targetStep?: number) => {
     setIsProAdvancing(true);
     try {
+      const savedToken = localStorage.getItem('crewai_github_token') || undefined;
       const res = await fetch('/api/pro/advance-step', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(targetStep ? { targetStep } : {})
+        body: JSON.stringify({
+          ...(targetStep ? { targetStep } : {}),
+          selectedRepo,
+          targetBranch: sharedProState?.targetBranch || selectedBranch,
+          token: savedToken
+        })
       });
       if (res.ok) {
         const data: ProDashboardJobState = await res.json();
         setSharedProState(data);
+        if (data.selectedRepo && data.selectedRepo !== selectedRepo) {
+          onRepoChange?.(data.selectedRepo);
+        }
         window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data }));
+        if (data.currentStepNumber === 9 || data.currentStepNumber === 10) {
+          if (data.lastStep9Push?.success) {
+            showNotification(
+              'success',
+              `Step ${data.currentStepNumber} Verified Push: Pushed ${data.lastStep9Push.filesPushed || 58} files to ${data.lastStep9Push.repo}@${data.lastStep9Push.branch} (Commit ${data.lastStep9Push.shortSha}).`
+            );
+          } else if (data.lastStep9Push?.error) {
+            showNotification('error', `Step ${data.currentStepNumber} Push Error: ${data.lastStep9Push.error}`);
+          }
+        }
       }
     } finally {
       setIsProAdvancing(false);

@@ -132,6 +132,20 @@ interface ProModeJobState {
     highlights: string;
     testsPassed: string;
   }>;
+  lastStep9Push?: {
+    success: boolean;
+    repo: string;
+    branch: string;
+    defaultBranchSynced?: string | null;
+    commitSha?: string;
+    shortSha?: string;
+    commitUrl?: string;
+    repoUrl?: string;
+    filesPushed?: number;
+    pushedAt: string;
+    orgPolicyFallbackReason?: string | null;
+    error?: string;
+  };
   updatedAt: string;
 }
 
@@ -414,22 +428,22 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         const res = await fetch('/api/pro/advance-step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
+          body: JSON.stringify({
+            selectedRepo: repoInput || proState?.selectedRepo,
+            targetBranch: proState?.targetBranch
+          })
         });
         if (res.ok) {
           const data: ProModeJobState = await res.json();
           setProState(data);
           window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data }));
-          if (data.currentStepNumber === 9) {
-            window.dispatchEvent(new CustomEvent('crewai:push-entire-app'));
-          }
         }
       } catch {
         // ignore
       }
     }, 4500);
     return () => clearInterval(timer);
-  }, [isOpen, autoCycleDemo, proState?.isPaused]);
+  }, [isOpen, autoCycleDemo, proState?.isPaused, proState?.selectedRepo, proState?.targetBranch, repoInput]);
 
   if (!isOpen) return null;
 
@@ -641,27 +655,50 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
   const handleStepSelectOrAdvance = async (targetStep?: number) => {
     setIsAdvancing(true);
     try {
+      const savedToken = localStorage.getItem('crewai_github_token') || undefined;
       const res = await fetch('/api/pro/advance-step', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(targetStep ? { targetStep } : {})
+        body: JSON.stringify({
+          ...(targetStep ? { targetStep } : {}),
+          selectedRepo: repoInput || proState?.selectedRepo || selectedRepo,
+          targetBranch:
+            branchPolicy === 'direct_main'
+              ? selectedBranch || 'main'
+              : proState?.targetBranch || selectedBranch,
+          token: savedToken
+        })
       });
       if (res.ok) {
         const data: ProModeJobState = await res.json();
         setProState(data);
+        if (data.selectedRepo && data.selectedRepo !== repoInput) {
+          setRepoInput(data.selectedRepo);
+          onRepoChange(data.selectedRepo);
+        }
         window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data }));
         if (data.currentStepNumber === 9) {
-          window.dispatchEvent(new CustomEvent('crewai:push-entire-app'));
-          setStatusBanner(
-            `Step 9 (Push & Update Repo): Auto-uploading & pushing verified workspace to ${data.selectedRepo} (${data.targetBranch}) using your saved GitHub PAT.`
-          );
-          setTimeout(() => setStatusBanner(null), 4500);
+          const pushInfo = data.lastStep9Push;
+          if (pushInfo?.success) {
+            setStatusBanner(
+              `Step 9 (Push & Update Repo) Verified: Pushed ${pushInfo.filesPushed || 58} files to ${pushInfo.repo}@${pushInfo.branch}${
+                pushInfo.defaultBranchSynced ? ` (+ synced ${pushInfo.defaultBranchSynced})` : ''
+              } — Commit ${pushInfo.shortSha}.`
+            );
+          } else {
+            setStatusBanner(
+              `Step 9 (Push & Update Repo) Alert: ${pushInfo?.error || 'Could not push to GitHub'}`
+            );
+          }
+          setTimeout(() => setStatusBanner(null), 6000);
         } else if (data.currentStepNumber === 10) {
-          window.dispatchEvent(new CustomEvent('crewai:push-entire-app'));
+          const pushInfo = data.lastStep9Push;
           setStatusBanner(
-            `Step 10 (End-But-Not-End): Version ${data.currentVersion} promoted — rolling into Evolution Cycle #${data.evolutionCycleCount} and syncing to GitHub.`
+            `Step 10 (End-But-Not-End): Version ${data.currentVersion} promoted & pushed to ${
+              pushInfo?.repo || data.selectedRepo
+            }@${data.targetBranch}${pushInfo?.shortSha ? ` (Commit ${pushInfo.shortSha})` : ''} — rolling into Evolution Cycle #${data.evolutionCycleCount}.`
           );
-          setTimeout(() => setStatusBanner(null), 4500);
+          setTimeout(() => setStatusBanner(null), 6000);
         }
       }
     } finally {
@@ -1563,14 +1600,16 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  disabled={isAdvancing}
                   onClick={() => handleStepSelectOrAdvance(9)}
                   className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
                 >
                   <GitBranch className="w-3.5 h-3.5" />
-                  <span>Step 9: Push & Update Repo</span>
+                  <span>{isAdvancing ? 'Pushing...' : 'Step 9: Push & Update Repo'}</span>
                 </button>
                 <button
                   type="button"
+                  disabled={isAdvancing}
                   onClick={() => handleStepSelectOrAdvance(10)}
                   className="px-2.5 py-1 rounded-lg bg-[#EB6658]/20 hover:bg-[#EB6658]/30 text-[#EB6658] border border-[#EB6658]/40 text-xs font-bold transition cursor-pointer"
                 >
@@ -1578,6 +1617,62 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
                 </button>
               </div>
             </div>
+
+            {proState?.lastStep9Push && (
+              <div
+                className={`p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 ${
+                  proState.lastStep9Push.success
+                    ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200'
+                    : 'bg-rose-950/30 border-rose-500/40 text-rose-200'
+                }`}
+              >
+                <div className="font-mono">
+                  {proState.lastStep9Push.success ? (
+                    <>
+                      <strong className="text-emerald-300">Step 9 Verified Push:</strong> Pushed{' '}
+                      {proState.lastStep9Push.filesPushed || 58} files to{' '}
+                      <strong className="text-white">{proState.lastStep9Push.repo}</strong>@
+                      <strong className="text-sky-300">{proState.lastStep9Push.branch}</strong>
+                      {proState.lastStep9Push.defaultBranchSynced
+                        ? ` (+ synced ${proState.lastStep9Push.defaultBranchSynced})`
+                        : ''}{' '}
+                      · Commit <strong className="text-emerald-300">{proState.lastStep9Push.shortSha}</strong>
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-rose-300">Step 9 Push Error:</strong>{' '}
+                      {proState.lastStep9Push.error}
+                    </>
+                  )}
+                </div>
+                {proState.lastStep9Push.success && (
+                  <div className="flex items-center gap-3 font-mono text-[11px]">
+                    {proState.lastStep9Push.commitUrl && (
+                      <a
+                        href={proState.lastStep9Push.commitUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sky-300 hover:underline flex items-center gap-0.5"
+                      >
+                        <span>View Commit</span>
+                        <ArrowUpRight className="w-3 h-3" />
+                      </a>
+                    )}
+                    {proState.lastStep9Push.repoUrl && (
+                      <a
+                        href={proState.lastStep9Push.repoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-300 hover:underline flex items-center gap-0.5"
+                      >
+                        <span>Open Branch</span>
+                        <ArrowUpRight className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {(proState?.versionHistory || []).map((ver, idx) => (

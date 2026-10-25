@@ -136,6 +136,20 @@ export interface ProDashboardJobState {
     highlights: string;
     testsPassed: string;
   }>;
+  lastStep9Push?: {
+    success: boolean;
+    repo: string;
+    branch: string;
+    defaultBranchSynced?: string | null;
+    commitSha?: string;
+    shortSha?: string;
+    commitUrl?: string;
+    repoUrl?: string;
+    filesPushed?: number;
+    pushedAt: string;
+    orgPolicyFallbackReason?: string | null;
+    error?: string;
+  };
   updatedAt: string;
 }
 
@@ -1409,6 +1423,89 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Step 9 Live GitHub Push Receipt */}
+          <div
+            className={`p-3 rounded-lg border text-xs space-y-1.5 ${
+              proState.lastStep9Push?.success
+                ? 'bg-emerald-950/25 border-emerald-500/40'
+                : proState.lastStep9Push?.error
+                ? 'bg-rose-950/30 border-rose-500/40'
+                : 'bg-slate-950/80 border-slate-800'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-bold text-white">
+                <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Step 9 · Live GitHub Push &amp; Update Status</span>
+              </div>
+              {proState.lastStep9Push?.success ? (
+                <div className="flex items-center gap-2 font-mono text-[11px]">
+                  <span className="text-emerald-300 font-bold">
+                    Commit {proState.lastStep9Push.shortSha} · {proState.lastStep9Push.filesPushed || 58} files pushed
+                  </span>
+                  {proState.lastStep9Push.commitUrl && (
+                    <a
+                      href={proState.lastStep9Push.commitUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-300 hover:underline flex items-center gap-0.5"
+                    >
+                      <span>View Commit</span>
+                      <ArrowUpRight className="w-3 h-3" />
+                    </a>
+                  )}
+                  {proState.lastStep9Push.repoUrl && (
+                    <a
+                      href={proState.lastStep9Push.repoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-300 hover:underline flex items-center gap-0.5"
+                    >
+                      <span>Open Repo</span>
+                      <ArrowUpRight className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isAdvancing}
+                  onClick={() => onSelectStep(9)}
+                  className="text-[11px] font-mono text-emerald-300 hover:underline cursor-pointer"
+                >
+                  Click &ldquo;Step 9: Push Repo&rdquo; to execute live Git Tree/Commit push →
+                </button>
+              )}
+            </div>
+            {proState.lastStep9Push?.success ? (
+              <div className="text-[11px] text-slate-300 flex flex-wrap items-center justify-between gap-2 font-mono">
+                <span>
+                  Target: <strong className="text-white">{proState.lastStep9Push.repo}</strong>@
+                  <strong className="text-sky-300">{proState.lastStep9Push.branch}</strong>
+                  {proState.lastStep9Push.defaultBranchSynced
+                    ? ` (also synced default branch: ${proState.lastStep9Push.defaultBranchSynced})`
+                    : ''}
+                </span>
+                <span className="text-slate-400">
+                  Pushed at {new Date(proState.lastStep9Push.pushedAt).toLocaleTimeString()}
+                </span>
+              </div>
+            ) : proState.lastStep9Push?.error ? (
+              <div className="text-[11px] text-rose-300 font-mono">
+                Error: {proState.lastStep9Push.error}
+              </div>
+            ) : (
+              <div className="text-[11px] text-slate-400">
+                Ready to push full workspace (including <code className="text-slate-300">src/</code> &amp;{' '}
+                <code className="text-slate-300">server/</code>) to{' '}
+                <span className="font-mono text-slate-200">
+                  {proState.selectedRepo}@{proState.targetBranch}
+                </span>{' '}
+                using saved GitHub PAT.
+              </div>
+            )}
           </div>
 
           {/* Step 9 & 10 Semantic Version Lineage */}
