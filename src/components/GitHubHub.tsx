@@ -21,6 +21,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { CardMinMaxButtons } from './CardMinMaxControl';
+import { TargetRepoSelector } from './TargetRepoSelector';
 import { CURATED_TARGET_REPOS, resolveRepoWorkforceProfile } from '../utils/repoWorkforceMapping';
 import { Users, Cpu, Layers } from 'lucide-react';
 
@@ -331,6 +332,7 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
       setUser(null);
       setStatusMessage({ type: 'error', text: e.message || 'Invalid GitHub Personal Access Token' });
       addLog(`[PAT AUTH ERROR] ${e.message}`);
+      await autoConnectServerSide();
     } finally {
       setIsConnectingPat(false);
     }
@@ -1126,93 +1128,22 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
       {/* Repository & Branch Controls + Dictated Agent Workforce Matrix */}
       <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="min-w-[260px]">
-              <label className="block text-[11px] text-slate-400 font-medium mb-1">
-                Target Repository <span className="text-slate-500">· Dictates Assigned Crew & Agents</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <select
-                  aria-label="Target GitHub Repository Preset or Connected Repo"
-                  value={
-                    CURATED_TARGET_REPOS.some((r) => r.displayRepo === selectedRepo) ||
-                    repos.some((r) => r.full_name === selectedRepo)
-                      ? selectedRepo
-                      : '__custom__'
-                  }
-                  onChange={(e) => {
-                    if (e.target.value !== '__custom__') {
-                      handleRepoChange(e.target.value);
-                    }
-                  }}
-                  className="bg-slate-950 border border-slate-700 text-xs text-slate-200 px-3 py-1.5 rounded-lg outline-none font-mono focus:border-[#EB6658]"
-                >
-                  <optgroup label="Curated Target Repositories (Auto-Mapped Crews)">
-                    {CURATED_TARGET_REPOS.map((item) => (
-                      <option key={item.displayRepo} value={item.displayRepo}>
-                        {item.displayRepo} — {item.crewName.replace(/\s*\(.*\)/, '')}
-                      </option>
-                    ))}
-                  </optgroup>
-                  {repos.length > 0 && (
-                    <optgroup label="Your Connected GitHub PAT Repositories">
-                      {repos
-                        .filter((r) => !CURATED_TARGET_REPOS.some((c) => c.displayRepo === r.full_name))
-                        .map((r) => (
-                          <option key={r.id} value={r.full_name}>
-                            {r.full_name} {r.private ? '(Private)' : ''}
-                          </option>
-                        ))}
-                    </optgroup>
-                  )}
-                  <option value="__custom__">Custom owner/repository...</option>
-                </select>
-
-                <input
-                  type="text"
-                  value={selectedRepo}
-                  onChange={(e) => handleRepoChange(e.target.value)}
-                  placeholder="owner/repository"
-                  title="Type any GitHub owner/repository"
-                  className="w-44 bg-slate-950 border border-slate-700 text-xs text-slate-200 px-3 py-1.5 rounded-lg outline-none font-mono focus:border-[#EB6658]"
-                />
-              </div>
-            </div>
-
-            <div className="min-w-[150px]">
-              <label className="block text-[11px] text-slate-400 font-medium mb-1">Branch</label>
-              <div className="flex items-center gap-1.5">
-                <div className="relative w-full">
-                  {branches.length > 0 ? (
-                    <select
-                      aria-label="Target GitHub Branch"
-                      value={selectedBranch}
-                      onChange={(e) => handleBranchChange(e.target.value)}
-                      disabled={isFetchingBranches}
-                      className="w-full bg-slate-950 border border-slate-700 text-xs text-slate-200 pl-8 pr-3 py-1.5 rounded-lg outline-none font-mono focus:border-[#EB6658] appearance-none disabled:opacity-50"
-                    >
-                      {branches.map((b) => (
-                        <option key={b.name} value={b.name}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={selectedBranch}
-                      onChange={(e) => handleBranchChange(e.target.value)}
-                      placeholder="main"
-                      className="w-full bg-slate-950 border border-slate-700 text-xs text-slate-200 pl-8 pr-3 py-1.5 rounded-lg outline-none font-mono focus:border-[#EB6658]"
-                    />
-                  )}
-                  <GitBranch className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  {isFetchingBranches && (
-                    <RefreshCw className="w-3 h-3 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin" />
-                  )}
-                </div>
-              </div>
-            </div>
+          <div className="flex-1 min-w-[280px]">
+            <label className="block text-xs text-slate-300 font-bold mb-2">
+              Target Repository · See &amp; Select Any Repository on Your Connected PAT GitHub Account
+            </label>
+            <TargetRepoSelector
+              selectedRepo={selectedRepo}
+              selectedBranch={selectedBranch}
+              onSelectRepo={(repo) => handleRepoChange(repo)}
+              onSelectBranch={(branch) => handleBranchChange(branch)}
+              onProjectLoaded={(repo, branch) => {
+                handleRepoChange(repo);
+                handleBranchChange(branch);
+              }}
+              variant="banner"
+              label="Target Repository"
+            />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">

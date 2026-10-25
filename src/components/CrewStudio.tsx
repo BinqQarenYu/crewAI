@@ -59,6 +59,7 @@ import { CardMinMaxButtons } from './CardMinMaxControl';
 import { CrewExecutionProgressBar, LiveTaskExecutionItem, LiveTaskExecStatus } from './CrewExecutionProgressBar';
 import { TaskDependencyGraphVisualizer } from './TaskDependencyGraphVisualizer';
 import { TargetRepoSelector } from './TargetRepoSelector';
+import { ProDashboard, ProDashboardJobState } from './ProDashboard';
 import { CURATED_TARGET_REPOS, resolveRepoWorkforceProfile } from '../utils/repoWorkforceMapping';
 import { emitJulesPrNotification } from '../utils/prNotifications';
 import { globalTaskThrottler } from '../utils/taskThrottler';
@@ -701,6 +702,8 @@ interface CrewStudioProps {
   onOpenOllamaScanner?: () => void;
   onNavigateToGitHub?: () => void;
   onOpenJules?: (context?: JulesContext) => void;
+  onOpenProMode?: () => void;
+  onOpenConstitutionalAudit?: (goalPrompt?: string) => void;
   selectedRepo: string;
   selectedBranch: string;
   onRepoChange?: (repo: string) => void;
@@ -711,6 +714,8 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
   onOpenOllamaScanner, 
   onNavigateToGitHub,
   onOpenJules,
+  onOpenProMode,
+  onOpenConstitutionalAudit,
   selectedRepo,
   selectedBranch,
   onRepoChange,
@@ -734,7 +739,147 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
   const [isOrgMatrixMinimized, setIsOrgMatrixMinimized] = useState<boolean>(false);
   const [isRepoWorkforceMinimized, setIsRepoWorkforceMinimized] = useState<boolean>(false);
   const [autoSyncRepoCrew, setAutoSyncRepoCrew] = useState<boolean>(true);
+  const [dashboardLens, setDashboardLens] = useState<'main_full' | 'pro_simplified'>('main_full');
+  const [sharedProState, setSharedProState] = useState<ProDashboardJobState | null>(null);
+  const [isProAdvancing, setIsProAdvancing] = useState<boolean>(false);
+  const [isProFormulating, setIsProFormulating] = useState<boolean>(false);
   const repoWorkforce = resolveRepoWorkforceProfile(selectedRepo);
+
+  // Bidirectional live sync between Main Dashboard (CrewStudio) and Pro Mode (/api/pro/*)
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/pro/status')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: ProDashboardJobState | null) => {
+        if (!mounted || !data) return;
+        setSharedProState(data);
+      })
+      .catch(() => {});
+
+    const handleProUpdate = (e: Event) => {
+      const detail = (e as CustomEvent<ProDashboardJobState>).detail;
+      if (detail && mounted) {
+        setSharedProState(detail);
+        if (detail.primaryGoal && detail.primaryGoal !== runInput) {
+          setRunInput(detail.primaryGoal);
+        }
+        if (detail.selectedRepo && detail.selectedRepo !== selectedRepo) {
+          onRepoChange?.(detail.selectedRepo);
+        }
+      }
+    };
+    window.addEventListener('crewai:pro-status-updated', handleProUpdate);
+    return () => {
+      mounted = false;
+      window.removeEventListener('crewai:pro-status-updated', handleProUpdate);
+    };
+  }, [selectedRepo, runInput, onRepoChange]);
+
+  // Whenever Main Dashboard repo, branch, goal (runInput), or tasks change, sync into the unified Pro state
+  useEffect(() => {
+    const mappedTasks = (crew.tasks || []).map((t, idx) => {
+      const agent =
+        crew.agents.find((a) => a.id === t.agentId) ||
+        crew.agents[idx % Math.max(1, crew.agents.length)];
+      const status: 'completed' | 'running' | 'healing' | 'queued' =
+        idx === 0 ? 'completed' : idx === 1 ? 'running' : 'queued';
+      return {
+        id: t.id,
+        stepOrder: idx + 1,
+        title: `${t.name}: ${t.description.slice(0, 90)}`,
+        assignedCrewRole: agent?.role || 'Specialist Agent',
+        agentName: agent?.name || 'Crew Agent',
+        constitutionGuard: 'CONST-01..06 Enforced (Shared Main ↔ Pro Task)',
+        status,
+        progressPct: status === 'completed' ? 100 : status === 'running' ? 68 : 20
+      };
+    });
+
+    fetch('/api/pro/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        selectedRepo,
+        targetBranch: selectedBranch,
+        primaryGoal: runInput,
+        delegatedTasks: mappedTasks.length > 0 ? mappedTasks : undefined
+      })
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: ProDashboardJobState | null) => {
+        if (data) setSharedProState(data);
+      })
+      .catch(() => {});
+  }, [selectedRepo, selectedBranch, runInput, crew.tasks, crew.agents]);
+
+  const handleInlineProStepAdvance = async (targetStep?: number) => {
+    setIsProAdvancing(true);
+    try {
+      const res = await fetch('/api/pro/advance-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(targetStep ? { targetStep } : {})
+      });
+      if (res.ok) {
+        const data: ProDashboardJobState = await res.json();
+        setSharedProState(data);
+        window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data }));
+      }
+    } finally {
+      setIsProAdvancing(false);
+    }
+  };
+
+  const handleInlineProFormulate = async () => {
+    setIsProFormulating(true);
+    try {
+      const res = await fetch('/api/pro/formulate-goal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawGoal: runInput,
+          selectedRepo,
+          fromAuditRecommendations: true
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.formulatedGoal) {
+          setRunInput(data.formulatedGoal);
+        }
+        if (data.state) {
+          setSharedProState(data.state);
+          window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data.state }));
+        }
+      }
+    } finally {
+      setIsProFormulating(false);
+    }
+  };
+
+  const handleInlineProCreditGovernor = async (payload: {
+    cooldownSeconds?: number;
+    simulateCreditsExhausted?: boolean;
+    restoreCredits?: boolean;
+    probeOllama?: boolean;
+  }) => {
+    try {
+      const res = await fetch('/api/pro/credit-governor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.state) {
+          setSharedProState(data.state);
+          window.dispatchEvent(new CustomEvent('crewai:pro-status-updated', { detail: data.state }));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   // Auto-Save Status
   const [lastSaved, setLastSaved] = useState<string | null>(
@@ -2800,56 +2945,52 @@ if __name__ == "__main__":
 
         {/* Preset Selector & Auto-save Status */}
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Interactive Target Repository Selector (Dictates Assigned Crew & Agents) */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#EB6658]/10 border border-[#EB6658]/30 text-xs font-mono">
-            <GitBranch className="w-3.5 h-3.5 text-[#EB6658] shrink-0" />
-            <span className="text-slate-300 font-sans font-semibold text-[11px]">Target Repo:</span>
-            <select
-              aria-label="Select Target GitHub Repository"
-              value={
-                CURATED_TARGET_REPOS.some((r) => r.displayRepo === selectedRepo)
-                  ? selectedRepo
-                  : '__custom__'
-              }
-              onChange={(e) => {
-                const nextRepo = e.target.value;
-                if (nextRepo === '__custom__') {
-                  if (onNavigateToGitHub) onNavigateToGitHub();
-                  return;
-                }
-                if (onRepoChange) onRepoChange(nextRepo);
-                const profile = resolveRepoWorkforceProfile(nextRepo);
-                if (onBranchChange && profile.defaultBranch) {
-                  onBranchChange(profile.defaultBranch);
-                }
-                if (autoSyncRepoCrew && PRESET_CREWS[profile.presetKey]) {
-                  handleSelectPreset(profile.presetKey);
-                  setRunInput(profile.recommendedTopic);
-                  showNotification(
-                    'success',
-                    `Target Repo "${nextRepo}" selected → Assigned ${profile.crewName} (Task Maker: ${profile.taskMaker.name}, Controller: ${profile.taskController.name})`
-                  );
-                }
-              }}
-              className="bg-slate-950 text-[#EB6658] font-bold text-xs px-2 py-0.5 rounded border border-slate-800 outline-none focus:border-[#EB6658] cursor-pointer"
+          {/* Unified Main Dashboard <-> Pro Simplified Lens Switcher */}
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => setDashboardLens('main_full')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                dashboardLens === 'main_full'
+                  ? 'bg-[#EB6658] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Full Granular Main Dashboard (8-Agent Workbench, Task DAG, Code & Execution Console)"
             >
-              {CURATED_TARGET_REPOS.map((item) => (
-                <option key={item.displayRepo} value={item.displayRepo} className="text-slate-200 font-mono">
-                  {item.displayRepo} ({item.presetKey.replace(/_/g, ' ')})
-                </option>
-              ))}
-              {!CURATED_TARGET_REPOS.some((r) => r.displayRepo === selectedRepo) && (
-                <option value="__custom__" className="text-slate-200 font-mono">
-                  {selectedRepo} (Custom)
-                </option>
-              )}
-              <option value="__custom__" className="text-amber-300 font-sans">
-                + Manage / Custom Repo in GitHub Hub...
-              </option>
-            </select>
-            <span className="text-slate-500">@</span>
-            <span className="text-slate-300">{selectedBranch}</span>
+              <Layers className="w-3.5 h-3.5" />
+              <span>Main Dashboard (Full)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDashboardLens('pro_simplified')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                dashboardLens === 'pro_simplified'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Pro Dashboard is the simplified 10-step lens of this exact same Main Dashboard engine & state"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Pro View (Simplified · Same Engine)</span>
+            </button>
           </div>
+
+          {/* Interactive Target Repository Selector (Shows all PAT GitHub Account Repos + Curated + Custom) */}
+          <TargetRepoSelector
+            selectedRepo={selectedRepo}
+            selectedBranch={selectedBranch}
+            onSelectRepo={(nextRepo) => {
+              onRepoChange?.(nextRepo);
+              const profile = resolveRepoWorkforceProfile(nextRepo);
+              if (autoSyncRepoCrew && PRESET_CREWS[profile.presetKey]) {
+                handleSelectPreset(profile.presetKey);
+                setRunInput(profile.recommendedTopic);
+              }
+            }}
+            onSelectBranch={(nextBranch) => onBranchChange?.(nextBranch)}
+            variant="inline"
+            label="Target Repo"
+          />
 
           <div className="h-4 w-px bg-slate-800 hidden sm:block" />
 
@@ -3079,6 +3220,43 @@ if __name__ == "__main__":
           />
         </div>
       </div>
+
+      {/* Inline Simplified Pro View (Same Unified Engine & State as Main Dashboard) */}
+      {dashboardLens === 'pro_simplified' && sharedProState && (
+        <div className="p-5 rounded-2xl bg-slate-950/90 border border-emerald-500/30 shadow-xl space-y-4">
+          <ProDashboard
+            proState={{
+              ...sharedProState,
+              selectedRepo,
+              targetBranch: selectedBranch || sharedProState.targetBranch,
+              primaryGoal: runInput || sharedProState.primaryGoal
+            }}
+            onSelectStep={(stepNum) => handleInlineProStepAdvance(stepNum)}
+            onSwitchToSetup={() => {
+              if (onOpenProMode) onOpenProMode();
+            }}
+            onSwitchToMainDashboard={() => setDashboardLens('main_full')}
+            onFormulateFromAudit={handleInlineProFormulate}
+            onUpdateCreditGovernor={handleInlineProCreditGovernor}
+            onOpenConstitutionalAudit={onOpenConstitutionalAudit}
+            onSelectTargetProject={(nextRepo, nextBranch) => {
+              onRepoChange?.(nextRepo);
+              onBranchChange?.(nextBranch);
+              const nextProfile = resolveRepoWorkforceProfile(nextRepo);
+              if (autoSyncRepoCrew && PRESET_CREWS[nextProfile.presetKey]) {
+                handleSelectPreset(nextProfile.presetKey);
+                setRunInput(nextProfile.recommendedTopic);
+              }
+              showNotification(
+                'success',
+                `Loaded Project ${nextRepo}@${nextBranch} across Unified Main & Pro Dashboard`
+              );
+            }}
+            isAdvancing={isProAdvancing}
+            isFormulating={isProFormulating}
+          />
+        </div>
+      )}
 
       {/* Target Repository -> Dictated Workforce & Collaborator Mapping Strip */}
       <div className="p-4 rounded-2xl bg-slate-900/75 border border-slate-800 space-y-3 shadow-md">

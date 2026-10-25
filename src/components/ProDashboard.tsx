@@ -152,6 +152,7 @@ interface ProDashboardProps {
   }) => void;
   onOpenConstitutionalAudit?: (goalPrompt?: string) => void;
   onSelectTargetProject?: (repo: string, branch: string) => void;
+  onSwitchToMainDashboard?: () => void;
   isAdvancing?: boolean;
   isFormulating?: boolean;
 }
@@ -248,6 +249,7 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
   onUpdateCreditGovernor,
   onOpenConstitutionalAudit,
   onSelectTargetProject,
+  onSwitchToMainDashboard,
   isAdvancing = false,
   isFormulating = false
 }) => {
@@ -415,6 +417,48 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Unified Engine Identity Banner: Pro & Main Dashboard Are One (Pro = Simplified View) */}
+      <div className="p-3.5 rounded-xl bg-gradient-to-r from-slate-900/95 via-[#11192C] to-slate-900/95 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 text-xs">
+          <span className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+            <Zap className="w-4 h-4" />
+          </span>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-white">
+                Unified Single-Engine Architecture (Pro = Simplified Lens of Main Dashboard)
+              </span>
+              <span className="text-[11px] font-mono text-emerald-300 tabular-nums">
+                100% Live Shared State · {proState.selectedRepo}@{proState.targetBranch} · {proState.delegatedTasks.length} Synchronized Tasks
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Pro Mode and the Main Studio Dashboard run on the exact same repository, branch, 8-Agent workforce, task DAG, Gemini credit governor, and immutable constitution—Pro simply streamlines the 10-step autonomous lifecycle into a single simplified view.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {onSwitchToMainDashboard && (
+            <button
+              type="button"
+              onClick={onSwitchToMainDashboard}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Switch to Full Main Dashboard</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-[#EB6658]" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onSwitchToSetup}
+            className="px-3 py-1.5 rounded-lg bg-[#EB6658]/15 hover:bg-[#EB6658]/25 text-[#EB6658] border border-[#EB6658]/40 text-xs font-semibold transition cursor-pointer"
+          >
+            10-Step Controls
+          </button>
+        </div>
+      </div>
+
       {/* Top Executive KPI Strip (5 Cards including Jules Constitutional Principles Monitor) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* KPI 1: 24-Hour Lifecycle Clock & Active Step */}

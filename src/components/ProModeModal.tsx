@@ -378,6 +378,12 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
       const res = await fetch('/api/pro/status');
       if (res.ok) {
         const data: ProModeJobState = await res.json();
+        if (selectedRepo && data.selectedRepo !== selectedRepo) {
+          data.selectedRepo = selectedRepo;
+        }
+        if (selectedBranch && data.branchPolicy === 'direct_main') {
+          data.targetBranch = selectedBranch;
+        }
         setProState(data);
         setGoalInput((prev) => {
           if (!prev && data.primaryGoal) {
@@ -392,8 +398,7 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
     } catch {
       // ignore transient network errors
     }
-  }, []);
-
+  }, [selectedRepo, selectedBranch]);
 
   useEffect(() => {
     if (isOpen) {
@@ -808,9 +813,13 @@ export const ProModeModal: React.FC<ProModeModalProps> = ({
         <div className="p-6 overflow-y-auto space-y-6">
           {activeModalTab === 'dashboard' && proState && (
             <ProDashboard
-              proState={proState}
+              proState={{
+                ...proState,
+                selectedRepo: repoInput || selectedRepo || proState.selectedRepo
+              }}
               onSelectStep={(stepNum) => handleStepSelectOrAdvance(stepNum)}
               onSwitchToSetup={() => setActiveModalTab('setup')}
+              onSwitchToMainDashboard={onClose}
               onFormulateFromAudit={() => handleFormulateGoal(true)}
               onUpdateCreditGovernor={handleUpdateCreditGovernor}
               onOpenConstitutionalAudit={onOpenConstitutionalAudit}

@@ -6,15 +6,35 @@ import {
   RefreshCw,
   Plus,
   ArrowRight,
-  ExternalLink
+  ExternalLink,
+  Search,
+  Lock,
+  Globe,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { CURATED_TARGET_REPOS, resolveRepoWorkforceProfile } from '../utils/repoWorkforceMapping';
 
 export interface GitHubRepoOption {
+  id?: number;
+  name?: string;
   full_name: string;
   default_branch?: string;
   description?: string;
   private?: boolean;
+  language?: string;
+  updated_at?: string;
+  html_url?: string;
+  owner_login?: string;
+}
+
+interface PatUserSummary {
+  login: string;
+  name?: string;
+  avatar_url?: string;
+  public_repos?: number;
+  total_private_repos?: number;
+  tokenType?: string;
 }
 
 interface TargetRepoSelectorProps {
@@ -33,18 +53,15 @@ function normalizeRepoInput(raw: string): { repo: string; extractedBranch?: stri
   let cleaned = (raw || '').trim();
   if (!cleaned) return { repo: 'bingkltech/crewAI' };
 
-  // Strip https://github.com/ prefix if user pasted a full GitHub URL
   cleaned = cleaned.replace(/^https?:\/\/(www\.)?github\.com\//i, '');
   cleaned = cleaned.replace(/\.git$/i, '');
   cleaned = cleaned.replace(/^\/+|\/+$/g, '');
 
-  // Check if URL includes /tree/<branch>
   const treeMatch = cleaned.match(/^([^/]+\/[^/]+)\/tree\/(.+)$/i);
   if (treeMatch) {
     return { repo: treeMatch[1], extractedBranch: treeMatch[2] };
   }
 
-  // Check if input uses owner/repo@branch syntax
   if (cleaned.includes('@')) {
     const [repoPart, branchPart] = cleaned.split('@');
     const parts = repoPart.split('/').filter(Boolean);
@@ -68,6 +85,7 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
   variant = 'banner',
   label = 'Target Repository'
 }) => {
+  const [patUser, setPatUser] = useState<PatUserSummary | null>(null);
   const [liveRepos, setLiveRepos] = useState<GitHubRepoOption[]>([]);
   const [customRepos, setCustomRepos] = useState<string[]>(() => {
     try {
@@ -84,6 +102,9 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
   const [branches, setBranches] = useState<string[]>(['main', 'master', 'develop']);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   const [isCustomMode, setIsCustomMode] = useState(false);
+  const [showPatRepoGrid, setShowPatRepoGrid] = useState(true);
+  const [repoSearchQuery, setRepoSearchQuery] = useState('');
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'public' | 'private'>('all');
   const [customRepoInput, setCustomRepoInput] = useState(selectedRepo);
   const [branchInput, setBranchInput] = useState(selectedBranch || 'main');
   const [loadedBadge, setLoadedBadge] = useState<string | null>(null);
@@ -98,24 +119,49 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
     }
   }, [selectedBranch]);
 
-  const fetchAvailableRepos = async () => {
+  const fetchPatAccountAndRepos = async () => {
     setIsLoadingRepos(true);
     try {
       const token = localStorage.getItem('crewai_github_token') || '';
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/github/repos', { headers });
-      if (res.ok) {
-        const data = await res.json();
+
+      const [userRes, reposRes] = await Promise.all([
+        fetch('/api/github/user', { headers }).catch(() => null),
+        fetch('/api/github/repos', { headers }).catch(() => null)
+      ]);
+
+      if (userRes && userRes.ok) {
+        const uData = await userRes.json().catch(() => null);
+        if (uData && uData.login) {
+          setPatUser({
+            login: uData.login,
+            name: uData.name,
+            avatar_url: uData.avatar_url,
+            public_repos: uData.public_repos,
+            total_private_repos: uData.total_private_repos,
+            tokenType: uData.tokenType
+          });
+        }
+      }
+
+      if (reposRes && reposRes.ok) {
+        const data = await reposRes.json().catch(() => null);
         if (Array.isArray(data)) {
           setLiveRepos(
             data
               .filter((r: any) => r && typeof r.full_name === 'string')
               .map((r: any) => ({
+                id: r.id,
+                name: r.name || r.full_name.split('/')[1] || r.full_name,
                 full_name: r.full_name,
                 default_branch: r.default_branch || 'main',
                 description: r.description || '',
-                private: Boolean(r.private)
+                private: Boolean(r.private),
+                language: r.language || '',
+                updated_at: r.updated_at || '',
+                html_url: r.html_url || `https://github.com/${r.full_name}`,
+                owner_login: r.owner?.login || r.full_name.split('/')[0]
               }))
           );
         }
@@ -133,9 +179,13 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
       const token = localStorage.getItem('crewai_github_token') || '';
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`/api/github/branches?repo=${encodeURIComponent(repoName)}`, {
-        headers
-      });
+      const [ownerPart, repoPart] = repoName.split('/');
+      const res = await fetch(
+        `/api/github/branches?owner=${encodeURIComponent(ownerPart)}&repo=${encodeURIComponent(
+          repoPart
+        )}`,
+        { headers }
+      );
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -153,8 +203,8 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
   };
 
   useEffect(() => {
-    fetchAvailableRepos();
-    const handlePatUpdate = () => fetchAvailableRepos();
+    fetchPatAccountAndRepos();
+    const handlePatUpdate = () => fetchPatAccountAndRepos();
     window.addEventListener('github-pat-updated', handlePatUpdate);
     return () => window.removeEventListener('github-pat-updated', handlePatUpdate);
   }, []);
@@ -166,17 +216,29 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
   const allKnownRepos = useMemo(() => {
     const map = new Map<
       string,
-      { repo: string; label: string; defaultBranch: string; source: 'github' | 'curated' | 'custom' }
+      {
+        repo: string;
+        label: string;
+        defaultBranch: string;
+        private?: boolean;
+        language?: string;
+        description?: string;
+        source: 'github' | 'curated' | 'custom';
+      }
     >();
 
-    // 1. Live GitHub user repositories
+    // 1. All Live GitHub PAT Account Repositories FIRST
     for (const r of liveRepos) {
+      const visTag = r.private ? 'Private' : 'Public';
+      const langTag = r.language ? ` · ${r.language}` : '';
+      const descTag = r.description ? ` — ${r.description.slice(0, 48)}` : '';
       map.set(r.full_name.toLowerCase(), {
         repo: r.full_name,
-        label: r.description
-          ? `${r.full_name} — ${r.description.slice(0, 52)}`
-          : `${r.full_name} (${r.private ? 'Private' : 'Public'} GitHub Repo)`,
+        label: `${r.full_name} [${visTag}${langTag}]${descTag}`,
         defaultBranch: r.default_branch || 'main',
+        private: r.private,
+        language: r.language,
+        description: r.description,
         source: 'github'
       });
     }
@@ -208,7 +270,7 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
       }
     }
 
-    // Ensure currently selectedRepo is always in the list
+    // Ensure currently selectedRepo is always present
     if (selectedRepo && !map.has(selectedRepo.toLowerCase())) {
       const profile = resolveRepoWorkforceProfile(selectedRepo);
       map.set(selectedRepo.toLowerCase(), {
@@ -222,19 +284,41 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
     return Array.from(map.values());
   }, [liveRepos, customRepos, selectedRepo, selectedBranch]);
 
+  const filteredPatRepos = useMemo(() => {
+    const q = repoSearchQuery.trim().toLowerCase();
+    return liveRepos.filter((r) => {
+      if (visibilityFilter === 'public' && r.private) return false;
+      if (visibilityFilter === 'private' && !r.private) return false;
+      if (!q) return true;
+      return (
+        r.full_name.toLowerCase().includes(q) ||
+        (r.description || '').toLowerCase().includes(q) ||
+        (r.language || '').toLowerCase().includes(q)
+      );
+    });
+  }, [liveRepos, repoSearchQuery, visibilityFilter]);
+
+  const publicCount = useMemo(() => liveRepos.filter((r) => !r.private).length, [liveRepos]);
+  const privateCount = useMemo(() => liveRepos.filter((r) => r.private).length, [liveRepos]);
+
   const applyProjectSelection = (rawRepo: string, rawBranch?: string) => {
     const { repo, extractedBranch } = normalizeRepoInput(rawRepo);
     if (!repo) return;
 
     const known = allKnownRepos.find((k) => k.repo.toLowerCase() === repo.toLowerCase());
+    const liveMatch = liveRepos.find((l) => l.full_name.toLowerCase() === repo.toLowerCase());
     const nextBranch =
-      extractedBranch || rawBranch || known?.defaultBranch || selectedBranch || 'main';
+      extractedBranch ||
+      rawBranch ||
+      liveMatch?.default_branch ||
+      known?.defaultBranch ||
+      selectedBranch ||
+      'main';
 
-    // Persist to custom repos if not curated or in liveRepos
     const isCurated = CURATED_TARGET_REPOS.some(
       (c) => c.displayRepo.toLowerCase() === repo.toLowerCase()
     );
-    const isLive = liveRepos.some((l) => l.full_name.toLowerCase() === repo.toLowerCase());
+    const isLive = Boolean(liveMatch);
     if (!isCurated && !isLive) {
       const updated = Array.from(new Set([repo, ...customRepos])).slice(0, 15);
       setCustomRepos(updated);
@@ -266,7 +350,7 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
     setBranchInput(nextBranch);
     setIsCustomMode(false);
     setLoadedBadge(`${repo}@${nextBranch}`);
-    setTimeout(() => setLoadedBadge(null), 3500);
+    setTimeout(() => setLoadedBadge(null), 4000);
   };
 
   if (variant === 'inline') {
@@ -274,7 +358,9 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
       <div className="flex items-center gap-1.5 flex-wrap">
         <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 text-xs">
           <FolderGit2 className="w-3.5 h-3.5 text-[#EB6658] shrink-0" />
-          <span className="text-slate-400 text-[11px] whitespace-nowrap">{label}:</span>
+          <span className="text-slate-400 text-[11px] whitespace-nowrap">
+            {patUser ? `@${patUser.login} PAT Repo` : label}:
+          </span>
           {!isCustomMode ? (
             <select
               aria-label="Select Target Repository Project"
@@ -283,27 +369,43 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
                 if (e.target.value === '__custom__') {
                   setIsCustomMode(true);
                 } else {
-                  applyProjectSelection(e.target.value);
+                  const chosen = e.target.value;
+                  const match = liveRepos.find(
+                    (l) => l.full_name.toLowerCase() === chosen.toLowerCase()
+                  );
+                  applyProjectSelection(chosen, match?.default_branch);
                 }
               }}
-              className="bg-transparent text-white font-mono font-semibold text-xs outline-none cursor-pointer max-w-[230px] truncate"
+              className="bg-transparent text-white font-mono font-semibold text-xs outline-none cursor-pointer max-w-[260px] truncate"
             >
               {liveRepos.length > 0 && (
-                <optgroup label="Your GitHub Repositories" className="bg-slate-950 text-slate-300">
-                  {allKnownRepos
-                    .filter((r) => r.source === 'github')
-                    .map((r) => (
-                      <option key={`gh-${r.repo}`} value={r.repo} className="bg-slate-950 text-white">
-                        {r.repo}
-                      </option>
-                    ))}
+                <optgroup
+                  label={`PAT GitHub Account (${patUser ? `@${patUser.login}` : 'Connected'} · ${liveRepos.length} Repos)`}
+                  className="bg-slate-950 text-emerald-300"
+                >
+                  {liveRepos.map((r) => (
+                    <option
+                      key={`gh-${r.full_name}`}
+                      value={r.full_name}
+                      className="bg-slate-950 text-white"
+                    >
+                      {r.full_name} {r.private ? '🔒 (Private)' : '(Public)'} · {r.default_branch || 'main'}
+                    </option>
+                  ))}
                 </optgroup>
               )}
-              <optgroup label="Target Project Repositories" className="bg-slate-950 text-slate-300">
+              <optgroup
+                label="Curated Architecture Blueprints"
+                className="bg-slate-950 text-amber-300"
+              >
                 {allKnownRepos
                   .filter((r) => r.source !== 'github')
                   .map((r) => (
-                    <option key={`cur-${r.repo}`} value={r.repo} className="bg-slate-950 text-white">
+                    <option
+                      key={`cur-${r.repo}`}
+                      value={r.repo}
+                      className="bg-slate-950 text-white"
+                    >
                       {r.label}
                     </option>
                   ))}
@@ -367,7 +469,7 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
         </div>
 
         {loadedBadge && (
-          <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 animate-fadeIn">
+          <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>Loaded {loadedBadge}</span>
           </span>
@@ -376,11 +478,12 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
     );
   }
 
-  // Banner or Card mode (used in CrewStudio, ProDashboard, and ProModeModal)
+  // Banner / Card mode: Full dropdown + Interactive Visual Grid of ALL PAT GitHub Account Repositories
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {/* Top Control Row: Dropdown + Branch + Load Project + Toggle PAT Repo Browser */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex-1 min-w-[240px] flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 focus-within:border-[#EB6658]">
+        <div className="flex-1 min-w-[260px] flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 focus-within:border-[#EB6658]">
           <FolderGit2 className="w-4 h-4 text-[#EB6658] shrink-0" />
           <select
             aria-label="Select Target Project to Load"
@@ -391,23 +494,30 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
                 setIsCustomMode(true);
               } else {
                 setIsCustomMode(false);
-                applyProjectSelection(val);
+                const match = liveRepos.find(
+                  (l) => l.full_name.toLowerCase() === val.toLowerCase()
+                );
+                applyProjectSelection(val, match?.default_branch);
               }
             }}
             className="w-full bg-transparent text-xs font-mono font-bold text-white outline-none cursor-pointer"
           >
             {liveRepos.length > 0 && (
               <optgroup
-                label={`Your Connected GitHub Projects (${liveRepos.length})`}
+                label={`PAT GitHub Account (${patUser ? `@${patUser.login}` : 'Connected'} · All ${liveRepos.length} Repositories)`}
                 className="bg-slate-950 text-emerald-300"
               >
-                {allKnownRepos
-                  .filter((r) => r.source === 'github')
-                  .map((r) => (
-                    <option key={`gh-${r.repo}`} value={r.repo} className="bg-slate-950 text-white">
-                      {r.label}
-                    </option>
-                  ))}
+                {liveRepos.map((r) => (
+                  <option
+                    key={`gh-${r.full_name}`}
+                    value={r.full_name}
+                    className="bg-slate-950 text-white"
+                  >
+                    {r.full_name} [{r.private ? 'Private' : 'Public'}
+                    {r.language ? ` · ${r.language}` : ''} · branch:{r.default_branch || 'main'}]
+                    {r.description ? ` — ${r.description.slice(0, 45)}` : ''}
+                  </option>
+                ))}
               </optgroup>
             )}
             <optgroup
@@ -476,6 +586,28 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
 
+        {liveRepos.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowPatRepoGrid((prev) => !prev)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer shrink-0 tabular-nums ${
+              showPatRepoGrid
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+            title="Show or hide all repositories from your connected GitHub PAT account"
+          >
+            <span>
+              PAT Account Repos ({liveRepos.length})
+            </span>
+            {showPatRepoGrid ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setIsCustomMode((prev) => !prev)}
@@ -492,10 +624,10 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
 
         <button
           type="button"
-          onClick={fetchAvailableRepos}
+          onClick={fetchPatAccountAndRepos}
           disabled={isLoadingRepos}
           className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition cursor-pointer shrink-0"
-          title="Refresh repositories from GitHub"
+          title="Refresh repositories from GitHub PAT account"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRepos ? 'animate-spin text-[#EB6658]' : ''}`} />
         </button>
@@ -511,7 +643,162 @@ export const TargetRepoSelector: React.FC<TargetRepoSelectorProps> = ({
         </a>
       </div>
 
-      {/* Custom Repo Input Row (when toggled or when typing custom owner/repo) */}
+      {/* Visual Browser to SEE and SELECT All Repositories on the Connected GitHub PAT Account */}
+      {liveRepos.length > 0 && showPatRepoGrid && (
+        <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs">
+              {patUser?.avatar_url && (
+                <img
+                  src={patUser.avatar_url}
+                  alt={patUser.login}
+                  className="w-5 h-5 rounded-full border border-emerald-500/40"
+                />
+              )}
+              <span className="font-bold text-white">
+                Connected GitHub PAT Account:{' '}
+                <span className="text-emerald-400 font-mono">
+                  @{patUser?.login || liveRepos[0]?.owner_login || 'GitHub'}
+                </span>
+              </span>
+              <span className="text-slate-500">·</span>
+              <span className="text-[11px] font-mono text-slate-300 tabular-nums">
+                {liveRepos.length} Total Repos ({publicCount} Public · {privateCount} Private)
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={repoSearchQuery}
+                  onChange={(e) => setRepoSearchQuery(e.target.value)}
+                  placeholder={`Search all ${liveRepos.length} PAT repos...`}
+                  className="bg-slate-900 text-xs text-white pl-8 pr-2.5 py-1 rounded-lg border border-slate-800 outline-none focus:border-[#EB6658] w-48 sm:w-56"
+                />
+              </div>
+
+              <div className="flex items-center rounded-lg bg-slate-900 border border-slate-800 p-0.5 text-[11px] font-mono tabular-nums">
+                <button
+                  type="button"
+                  onClick={() => setVisibilityFilter('all')}
+                  className={`px-2 py-0.5 rounded-md cursor-pointer transition ${
+                    visibilityFilter === 'all'
+                      ? 'bg-[#EB6658] text-white font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All ({liveRepos.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVisibilityFilter('public')}
+                  className={`px-2 py-0.5 rounded-md cursor-pointer transition ${
+                    visibilityFilter === 'public'
+                      ? 'bg-[#EB6658] text-white font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Public ({publicCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVisibilityFilter('private')}
+                  className={`px-2 py-0.5 rounded-md cursor-pointer transition ${
+                    visibilityFilter === 'private'
+                      ? 'bg-[#EB6658] text-white font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Private ({privateCount})
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-1">
+            {filteredPatRepos.map((repoItem) => {
+              const isSelected =
+                repoItem.full_name.toLowerCase() === selectedRepo.toLowerCase();
+              const defBranch = repoItem.default_branch || 'main';
+              return (
+                <button
+                  key={repoItem.full_name}
+                  type="button"
+                  onClick={() => applyProjectSelection(repoItem.full_name, defBranch)}
+                  className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    isSelected
+                      ? 'bg-[#EB6658]/15 border-[#EB6658] text-white shadow-sm'
+                      : 'bg-slate-900/70 hover:bg-slate-900 border-slate-800/90 hover:border-slate-700 text-slate-200'
+                  }`}
+                >
+                  <div className="w-full">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="font-mono text-xs font-bold truncate text-white">
+                        {repoItem.full_name}
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1 ${
+                          repoItem.private
+                            ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                            : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                        }`}
+                      >
+                        {repoItem.private ? (
+                          <>
+                            <Lock className="w-2.5 h-2.5" />
+                            <span>Private</span>
+                          </>
+                        ) : (
+                          <>
+                            <Globe className="w-2.5 h-2.5" />
+                            <span>Public</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    {repoItem.description ? (
+                      <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                        {repoItem.description}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 italic mt-0.5">
+                        GitHub repository on @{repoItem.owner_login || patUser?.login}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between w-full pt-1 border-t border-slate-800/60 text-[10px] font-mono text-slate-400 tabular-nums">
+                    <span className="flex items-center gap-1 text-sky-300">
+                      <GitBranch className="w-3 h-3" />
+                      <span>{defBranch}</span>
+                      {repoItem.language ? (
+                        <span className="text-slate-400">· {repoItem.language}</span>
+                      ) : null}
+                    </span>
+                    <span
+                      className={`font-bold ${
+                        isSelected ? 'text-emerald-400' : 'text-[#EB6658]'
+                      }`}
+                    >
+                      {isSelected ? '✓ Active Project' : 'Select & Load →'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+
+            {filteredPatRepos.length === 0 && (
+              <div className="col-span-full py-4 text-center text-xs text-slate-400">
+                No PAT repositories match &ldquo;{repoSearchQuery}&rdquo;.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Custom Repo Input Row */}
       {isCustomMode && (
         <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg bg-slate-950/90 border border-amber-500/30">
           <span className="text-[11px] font-semibold text-amber-300">

@@ -467,30 +467,42 @@ app.post('/api/github/disconnect-pat', (req, res) => {
 });
 
 app.get('/api/github/user', async (req, res) => {
-  const clientToken = req.headers.authorization?.split(' ')[1];
-  if (clientToken && isRealEnvValue(clientToken)) {
-    process.env.GITHUB_TOKEN = clientToken.trim();
-  }
+  loadEnvWithOverride();
+  const clientToken = req.headers.authorization?.split(' ')[1]?.trim();
   const serverToken = getGithubToken();
-  const token = clientToken || serverToken;
+  const primaryToken = (clientToken && isRealEnvValue(clientToken)) ? clientToken : serverToken;
 
-  if (!token) {
+  if (!primaryToken) {
     return res.status(401).json({ error: 'No GitHub token configured' });
   }
 
   try {
-    const userRes = await fetch('https://api.github.com/user', {
+    let activeToken = primaryToken;
+    let userRes = await fetch('https://api.github.com/user', {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${activeToken}`,
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28'
       }
     });
 
+    if (!userRes.ok && serverToken && serverToken !== activeToken) {
+      activeToken = serverToken;
+      userRes = await fetch('https://api.github.com/user', {
+        headers: {
+          'Authorization': `Bearer ${activeToken}`,
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28'
+        }
+      });
+    }
+
     const data: any = await userRes.json();
     if (!userRes.ok) {
       return res.status(userRes.status).json({ error: data.message || 'GitHub API error' });
     }
+
+    process.env.GITHUB_TOKEN = activeToken;
 
     const rawScopes = userRes.headers.get('x-oauth-scopes') || '';
     const scopes = rawScopes
@@ -502,8 +514,8 @@ app.get('/api/github/user', async (req, res) => {
 
     res.json({
       ...data,
-      isServerSide: !clientToken && Boolean(serverToken),
-      tokenType: detectGitHubTokenType(token),
+      isServerSide: activeToken === serverToken,
+      tokenType: detectGitHubTokenType(activeToken),
       scopes: scopes.length > 0 ? scopes : ['repo', 'read:user'],
       rateLimit: {
         remaining: rateLimitRemaining,
@@ -655,28 +667,61 @@ app.get('/api/github/status', async (req, res) => {
 });
 
 app.get('/api/github/repos', async (req, res) => {
-  const clientToken = req.headers.authorization?.split(' ')[1];
-  const token = clientToken || getGithubToken();
+  loadEnvWithOverride();
+  const clientToken = req.headers.authorization?.split(' ')[1]?.trim();
+  const serverToken = getGithubToken();
+  const primaryToken = (clientToken && isRealEnvValue(clientToken)) ? clientToken : serverToken;
 
-  if (!token) {
+  if (!primaryToken) {
     return res.status(401).json({ error: 'No GitHub token configured' });
   }
 
-  try {
-    const reposRes = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28'
-      }
-    });
+  const fetchAllPagesForToken = async (tok: string) => {
+    const ghHeaders = {
+      'Authorization': `Bearer ${tok}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    };
 
-    const data: any = await reposRes.json();
-    if (!reposRes.ok) {
-      return res.status(reposRes.status).json({ error: data.message || 'GitHub API error' });
+    const page1Res = await fetch(
+      'https://api.github.com/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100&page=1',
+      { headers: ghHeaders }
+    );
+    if (!page1Res.ok) {
+      return { ok: false, status: page1Res.status, data: await page1Res.json().catch(() => ({})) };
+    }
+    const page1Data: any = await page1Res.json();
+    let combined: any[] = Array.isArray(page1Data) ? page1Data : [];
+
+    if (combined.length === 100) {
+      const page2Res = await fetch(
+        'https://api.github.com/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100&page=2',
+        { headers: ghHeaders }
+      );
+      if (page2Res.ok) {
+        const page2Data: any = await page2Res.json().catch(() => []);
+        if (Array.isArray(page2Data) && page2Data.length > 0) {
+          combined = [...combined, ...page2Data];
+        }
+      }
     }
 
-    res.json(data);
+    return { ok: true, status: 200, data: combined };
+  };
+
+  try {
+    let result = await fetchAllPagesForToken(primaryToken);
+    if (!result.ok && serverToken && serverToken !== primaryToken) {
+      result = await fetchAllPagesForToken(serverToken);
+    }
+
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: (result.data as any)?.message || 'GitHub API error'
+      });
+    }
+
+    res.json(result.data);
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to fetch GitHub repositories' });
   }
@@ -696,9 +741,19 @@ async function fetchGitHubReadWithOrgFallback(url: string, headers: Record<strin
 }
 
 app.get('/api/github/branches', async (req, res) => {
-  const clientToken = req.headers.authorization?.split(' ')[1];
-  const token = clientToken || getGithubToken();
-  const { owner, repo } = req.query;
+  loadEnvWithOverride();
+  const clientToken = req.headers.authorization?.split(' ')[1]?.trim();
+  const token = (clientToken && isRealEnvValue(clientToken)) ? clientToken : getGithubToken();
+  let owner = String(req.query.owner || '').trim();
+  let repo = String(req.query.repo || '').trim();
+
+  if (!owner && repo.includes('/')) {
+    const parts = repo.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      owner = parts[0];
+      repo = parts[1];
+    }
+  }
 
   if (!owner || !repo) {
     return res.status(400).json({ error: 'Missing owner or repo query parameters' });
@@ -4843,8 +4898,10 @@ app.post('/api/pro/credit-governor', async (req, res) => {
 });
 
 app.post('/api/pro/start', (req, res) => {
-  const { selectedRepo, primaryGoal, branchPolicy, cooldownSeconds } = req.body || {};
-  if (selectedRepo) proModeState.selectedRepo = String(selectedRepo);
+  const { selectedRepo, targetBranch, primaryGoal, branchPolicy, cooldownSeconds, delegatedTasks } =
+    req.body || {};
+  if (selectedRepo) proModeState.selectedRepo = String(selectedRepo).trim();
+  if (targetBranch) proModeState.targetBranch = String(targetBranch).trim();
   if (branchPolicy === 'jules_autonomous_branch' || branchPolicy === 'direct_main') {
     proModeState.branchPolicy = branchPolicy;
   }
@@ -4852,7 +4909,12 @@ app.post('/api/pro/start', (req, res) => {
     geminiGovernorState.patientCooldownSeconds = cooldownSeconds;
     proModeState.rateLimitGuard.cooldownSecondsBetweenTasks = cooldownSeconds;
   }
-  if (primaryGoal && String(primaryGoal).trim() !== proModeState.primaryGoal) {
+  if (Array.isArray(delegatedTasks) && delegatedTasks.length > 0) {
+    if (primaryGoal) {
+      proModeState.primaryGoal = String(primaryGoal).trim();
+    }
+    proModeState.delegatedTasks = delegatedTasks;
+  } else if (primaryGoal && String(primaryGoal).trim() !== proModeState.primaryGoal) {
     proModeState.primaryGoal = String(primaryGoal).trim();
     proModeState.delegatedTasks = buildTasksFromFormulatedGoal(
       proModeState.primaryGoal,

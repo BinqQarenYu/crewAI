@@ -254,6 +254,11 @@ export const App: React.FC = () => {
               setJulesContext(ctx || null);
               setIsJulesOpen(true);
             }}
+            onOpenProMode={() => setIsProModeOpen(true)}
+            onOpenConstitutionalAudit={(goalPrompt) => {
+              setConstitutionalInit(goalPrompt ? { prompt: goalPrompt } : {});
+              setIsConstitutionalAuditOpen(true);
+            }}
             selectedRepo={selectedRepo}
             selectedBranch={selectedBranch}
             onRepoChange={(repo) => {
