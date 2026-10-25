@@ -90,6 +90,24 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
   const [isConnectingPat, setIsConnectingPat] = useState<boolean>(false);
   const [isFetchingBranches, setIsFetchingBranches] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const [syncDiagnostics, setSyncDiagnostics] = useState<{
+    connected: boolean;
+    userLogin?: string;
+    tokenType?: string;
+    tokenExpiration?: string;
+    directTargetWritable?: boolean;
+    orgPolicyBlocked?: boolean;
+    orgPolicyMessage?: string;
+    effectivePushRepo?: string;
+    largeAssetsIgnored?: boolean;
+    issues?: Array<{
+      code: string;
+      severity: 'warning' | 'info' | 'error';
+      title: string;
+      detail: string;
+      actionUrl?: string;
+    }>;
+  } | null>(null);
 
   // Pull State
   const [remoteFiles, setRemoteFiles] = useState<RemoteFileItem[]>([]);
@@ -396,12 +414,30 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
     setStatusMessage({ type: 'info', text: 'Disconnected from GitHub. Enter a new PAT below to reconnect.' });
   };
 
-  // Fetch branches for selected repo
+  // Fetch branches and sync diagnostics for selected repo
+  const fetchSyncDiagnostics = async (repoFullName: string, branchName: string) => {
+    try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(
+        `/api/github/status?repo=${encodeURIComponent(repoFullName)}&branch=${encodeURIComponent(branchName)}`,
+        { headers }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSyncDiagnostics(data);
+      }
+    } catch {
+      // ignore diagnostics error
+    }
+  };
+
   useEffect(() => {
     if (selectedRepo) {
       fetchBranches(selectedRepo);
+      fetchSyncDiagnostics(selectedRepo, selectedBranch);
     }
-  }, [selectedRepo, user, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedRepo, selectedBranch, user, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchBranches = async (repoFullName: string) => {
     const [owner, repo] = repoFullName.split('/');
@@ -462,10 +498,16 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
         throw new Error(data.error || `Failed to pull ${selectedRepo} (${res.status})`);
       }
 
+      const effectiveBranch = data.resolvedBranch || selectedBranch;
+      if (data.resolvedBranch && data.resolvedBranch !== selectedBranch) {
+        onBranchChange(data.resolvedBranch);
+        addLog(`[GIT PULL] Auto-resolved default branch "${data.resolvedBranch}" for ${selectedRepo}.`);
+      }
+
       setRecentCommits(data.commits || []);
       setRemoteFiles(data.files || []);
-      addLog(`[GIT PULL] Pulled ${(data.commits || []).length} commits and ${(data.files || []).length} tree objects.`);
-      setStatusMessage({ type: 'success', text: `Successfully pulled ${selectedRepo}@${selectedBranch}` });
+      addLog(`[GIT PULL] Pulled ${(data.commits || []).length} commits and ${(data.files || []).length} tree objects (${data.totalTreeEntries || (data.files || []).length} total entries).`);
+      setStatusMessage({ type: 'success', text: `Successfully pulled ${selectedRepo}@${effectiveBranch}` });
     } catch (e: any) {
       addLog(`[GIT PULL ERROR] ${e.message}`);
       setStatusMessage({ type: 'error', text: `Pull error: ${e.message}` });
@@ -543,12 +585,31 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
         throw new Error(pushResult.error || 'Failed to push commit');
       }
 
+      const finalRepo = pushResult.resolvedRepo || selectedRepo;
+      const finalBranch = pushResult.resolvedBranch || selectedBranch;
+      if (finalRepo !== selectedRepo) {
+        onRepoChange(finalRepo);
+        localStorage.setItem('crewai_selected_repo', finalRepo);
+      }
+      if (finalBranch !== selectedBranch) {
+        onBranchChange(finalBranch);
+        localStorage.setItem('crewai_selected_branch', finalBranch);
+      }
+      if (pushResult.orgPolicyFallbackReason) {
+        addLog(`[GIT PUSH POLICY FALLBACK] ${pushResult.orgPolicyFallbackReason}`);
+      }
+
       const commitSha = pushResult.commit?.sha?.substring(0, 7) || 'latest';
-      const commitUrl = pushResult.commit?.html_url || `https://github.com/${selectedRepo}/commits/${selectedBranch}`;
+      const commitUrl = pushResult.commit?.html_url || `https://github.com/${finalRepo}/commits/${finalBranch}`;
       setLastCommitUrl(commitUrl);
 
-      addLog(`[GIT PUSH SUCCESS] Commit ${commitSha} created successfully! Link: ${commitUrl}`);
-      setStatusMessage({ type: 'success', text: `Committed ${pushFilePath} to ${selectedRepo}@${selectedBranch} (Commit ${commitSha})` });
+      addLog(`[GIT PUSH SUCCESS] Commit ${commitSha} created on ${finalRepo}@${finalBranch}! Link: ${commitUrl}`);
+      setStatusMessage({
+        type: 'success',
+        text: `Committed ${pushFilePath} to ${finalRepo}@${finalBranch} (Commit ${commitSha})${
+          pushResult.orgPolicyFallbackReason ? ` — Auto-routed due to org token policy` : ''
+        }`
+      });
 
       handlePullRepo();
     } catch (e: any) {
@@ -608,6 +669,9 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
       const commitUrl = data.commitUrl || `https://github.com/${data.repo || selectedRepo}/commits/${data.branch || selectedBranch}`;
       setLastCommitUrl(commitUrl);
 
+      if (data.orgPolicyFallbackReason) {
+        addLog(`[FULL APP PUSH POLICY FALLBACK] ${data.orgPolicyFallbackReason}`);
+      }
       addLog(
         `[FULL APP PUSH SUCCESS] Pushed ${data.filesPushed || 47} application files to ${data.repo}@${data.branch} (Commit ${commitSha})! Link: ${commitUrl}`
       );
@@ -985,6 +1049,76 @@ export const GitHubHub: React.FC<GitHubHubProps> = ({
             <span>Token: {maskedCurrentToken}</span>
             <span>•</span>
             <span>Target: {selectedRepo}@{selectedBranch}</span>
+          </div>
+        </div>
+      )}
+
+      {/* GitHub Sync Diagnostics & Organization Token Policy Audit Panel */}
+      {syncDiagnostics && syncDiagnostics.issues && syncDiagnostics.issues.length > 0 && (
+        <div className="p-4 rounded-2xl bg-slate-900/80 border border-amber-500/30 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400" />
+              <h3 className="text-xs sm:text-sm font-bold text-white">
+                GitHub Sync Diagnostics & Organization Token Policy Status
+              </h3>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                Effective Push Target: {syncDiagnostics.effectivePushRepo || selectedRepo}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {syncDiagnostics.effectivePushRepo && syncDiagnostics.effectivePushRepo !== selectedRepo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRepoChange(syncDiagnostics.effectivePushRepo!);
+                    localStorage.setItem('crewai_selected_repo', syncDiagnostics.effectivePushRepo!);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#EB6658]/20 hover:bg-[#EB6658]/30 text-[#EB6658] border border-[#EB6658]/40 text-[11px] font-bold transition cursor-pointer"
+                >
+                  Switch Target to {syncDiagnostics.effectivePushRepo}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => fetchSyncDiagnostics(selectedRepo, selectedBranch)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold transition cursor-pointer flex items-center gap-1"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Re-Verify Sync</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {syncDiagnostics.issues.map((issue) => (
+              <div
+                key={issue.code}
+                className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                  issue.severity === 'warning'
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                    : issue.severity === 'error'
+                    ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                    : 'bg-sky-500/10 border-sky-500/30 text-sky-200'
+                }`}
+              >
+                <div className="font-bold flex items-center justify-between gap-2">
+                  <span>{issue.title}</span>
+                  {issue.actionUrl && (
+                    <a
+                      href={issue.actionUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] underline font-mono flex items-center gap-1 shrink-0 text-amber-300 hover:text-white"
+                    >
+                      <span>Adjust Token Expiration</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+                <p className="text-[11px] opacity-90 leading-relaxed">{issue.detail}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}

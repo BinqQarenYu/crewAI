@@ -13,6 +13,42 @@ export interface ToolItem {
 
 export const TOOLS_CATALOG: ToolItem[] = [
   {
+    id: 'skill_seekers_universal',
+    name: 'SkillSeekersUniversalTool',
+    category: 'ai_ml',
+    categoryLabel: 'Skill Seekers v3.9+ Hub',
+    description: 'Universal knowledge & skill synthesis engine from bingkltech/Skill_Seekers (v3.9.0+). Ingests 19 source types (GitHub C3.x AST, Docs SPAs, PDFs, Notebooks, OpenAPI, Video OCR, Wikis, and Authorized Remote PCs) and packages into 23 targets (CrewAI Studio, Claude, Gemini, OpenAI, LangChain, Qdrant, Cursor, Windsurf).',
+    envKeys: ['GITHUB_TOKEN', 'GEMINI_API_KEY', 'OLLAMA_BASE_URL'],
+    importStatement: 'from skill_seekers.crewai_bridge import SkillSeekersUniversalTool',
+    codeSnippet: 'skill_seeker = SkillSeekersUniversalTool(\n  source="bingkltech/Skill_Seekers",\n  preset="comprehensive",\n  targets=["crewai-studio", "gemini", "claude", "langchain"],\n  enable_fts5_index=True\n)',
+    usageExample: 'architect_agent = Agent(\n  role="Universal Skill Synthesis Architect",\n  goal="Extract C3.x AST patterns, how-to guides, and RAG chunks from any repo or doc source",\n  backstory="Powered by Skill Seekers v3.9.0+ (19 sources -> 23 targets, 40 MCP tools)",\n  tools=[SkillSeekersUniversalTool()],\n  verbose=True\n)',
+    popular: true
+  },
+  {
+    id: 'authorized_remote_pc_bridge',
+    name: 'AuthorizedRemotePCBridgeTool',
+    category: 'automation',
+    categoryLabel: 'Legal Remote PC Mesh',
+    description: 'Consent-verified, legal multi-PC connection bridge. Connects to any owner-authorized workstation, LAN/Tailscale node, remote Ollama GPU server (:11434), Skill Seekers MCP host (:8765), or OpenSSH endpoint when asked—enforcing mutual token/PIN attestation and full audit logs.',
+    envKeys: ['REMOTE_PC_AUTH_TOKEN', 'OLLAMA_BASE_URL', 'SSH_KNOWN_HOSTS'],
+    importStatement: 'from crewai_tools import AuthorizedRemotePCBridgeTool',
+    codeSnippet: 'remote_pc = AuthorizedRemotePCBridgeTool(\n  host="192.168.1.50:11434",\n  protocol="http_agent_mesh",\n  legal_consent_verified=True,\n  allowed_scopes=["skill_seekers_scan", "ollama_gpu_infer", "authorized_shell"]\n)',
+    usageExample: 'remote_ops_agent = Agent(\n  role="Cross-PC Distributed Systems Operator",\n  goal="Connect to owner-authorized remote PCs to run Skill Seekers scans, GPU inference, and legal dev tasks",\n  backstory="Strictly enforces owner consent, mutual pairing tokens, and non-exploit standard protocols",\n  tools=[AuthorizedRemotePCBridgeTool()],\n  verbose=True\n)',
+    popular: true
+  },
+  {
+    id: 'skill_seekers_mcp_40',
+    name: 'SkillSeekersMCP40Toolkit',
+    category: 'integration',
+    categoryLabel: 'MCP 40-Tool Suite',
+    description: 'Exposes all 40 Model Context Protocol (MCP) tools and 68 workflow presets from bingkltech/Skill_Seekers directly to CrewAI agents: project_scan, detect_source, c3x_gof_patterns, fts5_search, quality_gate, and multi_target_export.',
+    envKeys: ['SKILL_SEEKERS_MCP_URL'],
+    importStatement: 'from skill_seekers.mcp import SkillSeekersMCP40Toolkit',
+    codeSnippet: 'mcp_toolkit = SkillSeekersMCP40Toolkit(\n  mcp_endpoint="http://127.0.0.1:8765/mcp",\n  workflow_preset="fullstack-architecture-audit"\n)',
+    usageExample: 'mcp_controller = Agent(\n  role="MCP Knowledge Orchestrator",\n  goal="Query FTS5 skill indexes before reading large files and enforce >=9.0/10 skill quality gates",\n  tools=[SkillSeekersMCP40Toolkit()],\n  verbose=True\n)',
+    popular: true
+  },
+  {
     id: 'gmail_toolkit',
     name: 'GmailToolkit',
     category: 'integration',

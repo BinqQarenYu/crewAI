@@ -1,5 +1,5 @@
 {
-  "name": "crew-studio",
+  "name": "crewai-studio",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -8,9 +8,7 @@
     "start": "node server.ts",
     "build": "tsc -b && vite build",
     "lint": "tsc --noEmit",
-    "preview": "vite preview --port 3000",
-    "runner:install": "cd runner && uv venv --python 3.12 .venv && uv pip install crewai",
-    "runner:check": "cd runner && .venv/Scripts/python.exe main.py --help"
+    "preview": "vite preview --port 3000"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",

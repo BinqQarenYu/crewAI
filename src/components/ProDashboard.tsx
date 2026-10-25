@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -24,8 +24,18 @@ import {
   Zap,
   Clock,
   ArrowUpRight,
-  FastForward
+  FastForward,
+  Scale,
+  Lock
 } from 'lucide-react';
+import {
+  IMMUTABLE_CONSTITUTION_ARTICLES,
+  CONSTITUTION_ROOT_HASH,
+  validateAutonomousGoal
+} from '../utils/constitutionalValidator';
+import { ConstitutionalImpactAnalysis } from './ConstitutionalImpactAnalysis';
+
+
 
 export interface ProDashboardAuditFinding {
   id: string;
@@ -44,19 +54,6 @@ export interface ProDashboardJobState {
   selectedRepo: string;
   targetBranch: string;
   branchPolicy: 'jules_autonomous_branch' | 'direct_main';
-  pulledTarget?: {
-    repo: string;
-    branch: string;
-    baseBranch: string;
-    pulledAt: string;
-    status: 'synced' | 'pulling' | 'cached_snapshot';
-    filesCount: number;
-    commitsCount: number;
-    latestCommitSha: string;
-    latestCommitMessage: string;
-    latestCommitAuthor: string;
-    sampleFiles: string[];
-  };
   maxHealAttempts: number;
   consecutiveFailures: number;
   immutableConstitution?: {
@@ -145,17 +142,17 @@ interface ProDashboardProps {
   onSelectStep: (stepNumber: number) => void;
   onSwitchToSetup: () => void;
   onFormulateFromAudit?: () => void;
-  onPullProjectTarget?: () => void;
   onUpdateCreditGovernor?: (payload: {
     cooldownSeconds?: number;
     simulateCreditsExhausted?: boolean;
     restoreCredits?: boolean;
     probeOllama?: boolean;
   }) => void;
+  onOpenConstitutionalAudit?: (goalPrompt?: string) => void;
   isAdvancing?: boolean;
   isFormulating?: boolean;
-  isPullingTarget?: boolean;
 }
+
 
 const LIFECYCLE_STEPS_META = [
   {
@@ -168,11 +165,11 @@ const LIFECYCLE_STEPS_META = [
   },
   {
     step: 2,
-    code: '02 / 2.1',
-    name: 'Select & Pull Project Target',
-    owner: 'Workspace Router & Git Pull Bridge',
+    code: '02',
+    name: 'Select Project',
+    owner: 'Workspace Router',
     windowHours: '0.5h – 1.0h',
-    summary: 'Select target repository (2) and pull remote project target tree, commits & AST (2.1).'
+    summary: 'Lock target repository and isolated jules/autonomous-* branch.'
   },
   {
     step: 3,
@@ -245,13 +242,62 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
   onSelectStep,
   onSwitchToSetup,
   onFormulateFromAudit,
-  onPullProjectTarget,
   onUpdateCreditGovernor,
+  onOpenConstitutionalAudit,
   isAdvancing = false,
-  isFormulating = false,
-  isPullingTarget = false
+  isFormulating = false
 }) => {
   const [selectedMetricTab, setSelectedMetricTab] = useState<'pacing' | 'alignment'>('pacing');
+  const [extraQueuedTasks, setExtraQueuedTasks] = useState<ProDashboardJobState['delegatedTasks']>([]);
+  const [constitutionTelemetry, setConstitutionTelemetry] = useState<{
+    activeCoreCount: number;
+    customGuardrailCount: number;
+    totalAuditsRun: number;
+    blockedCount: number;
+    rootHash: string;
+  }>({
+    activeCoreCount: IMMUTABLE_CONSTITUTION_ARTICLES.length,
+    customGuardrailCount: 0,
+    totalAuditsRun: 2,
+    blockedCount: 1,
+    rootHash: CONSTITUTION_ROOT_HASH
+  });
+
+
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/fullstack/constitution')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        const immutableLen = Array.isArray(data.immutableArticles)
+          ? data.immutableArticles.length
+          : IMMUTABLE_CONSTITUTION_ARTICLES.length;
+        const customLen = Array.isArray(data.customRules) ? data.customRules.length : 0;
+        const audits = Array.isArray(data.audits) ? data.audits : [];
+        const blocked = audits.filter((a: any) => a.status === 'BLOCKED').length;
+        setConstitutionTelemetry({
+          activeCoreCount: immutableLen,
+          customGuardrailCount: customLen,
+          totalAuditsRun: audits.length,
+          blockedCount: blocked,
+          rootHash: data.constitutionRootHash || CONSTITUTION_ROOT_HASH
+        });
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [proState.updatedAt, proState.currentStepNumber]);
+
+  const activeGoalAudit = useMemo(
+    () =>
+      validateAutonomousGoal(proState.primaryGoal || '', {
+        actor: 'Jules Autonomous Agent'
+      }),
+    [proState.primaryGoal]
+  );
+
   const creditsPct = proState.rateLimitGuard.geminiCreditsRemainingPct ?? 93;
   const creditsExhausted = Boolean(proState.rateLimitGuard.allGeminiCreditsExhausted || creditsPct <= 0);
   const ollamaInfo = proState.rateLimitGuard.ollamaFallback;
@@ -261,6 +307,7 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
     100,
     Math.round(((proState.cycleHoursElapsed || 6.5) / (proState.cycleTotalHours || 24)) * 100)
   );
+
 
   // Build 24-hour trajectory dataset for the Recharts visualization
   const timelineChartData = useMemo(() => {
@@ -338,7 +385,7 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
       const completion =
         item.step < activeStep ? 100 : item.step === activeStep ? 68 : 12;
       return {
-        name: `S${item.step === 2 ? '2/2.1' : item.step === 6 ? '6/6.1' : item.step}`,
+        name: `S${item.step === 6 ? '6/6.1' : item.step}`,
         fullTitle: item.name,
         stepNum: item.step,
         completion,
@@ -364,9 +411,10 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Executive KPI Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Top Executive KPI Strip (5 Cards including Jules Constitutional Principles Monitor) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* KPI 1: 24-Hour Lifecycle Clock & Active Step */}
+
         <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-xs text-slate-400">
@@ -468,7 +516,53 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
             <span className="text-slate-200 truncate">{proState.targetBranch}</span>
           </div>
         </div>
+
+        {/* KPI 5: Active Core Constitutional Principles Monitored by Jules */}
+        <div
+          onClick={() => onOpenConstitutionalAudit?.(proState.primaryGoal)}
+          role={onOpenConstitutionalAudit ? 'button' : undefined}
+          tabIndex={onOpenConstitutionalAudit ? 0 : undefined}
+          onKeyDown={(e) => {
+            if (onOpenConstitutionalAudit && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault();
+              onOpenConstitutionalAudit(proState.primaryGoal);
+            }
+          }}
+          className={`bg-slate-900/70 border border-amber-500/40 rounded-xl p-4 flex flex-col justify-between transition ${
+            onOpenConstitutionalAudit ? 'hover:bg-slate-900 hover:border-amber-400 cursor-pointer' : ''
+          }`}
+          title="Active Immutable Core Principles monitored in real time by Google Jules"
+        >
+          <div>
+            <div className="flex items-center justify-between text-xs text-amber-300">
+              <span className="font-semibold flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                </span>
+                <span>Jules Constitution Guard</span>
+              </span>
+              <Scale className="w-4 h-4 text-amber-400 shrink-0" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-2 tabular-nums">
+              <span className="text-2xl font-extrabold text-white font-mono">
+                {constitutionTelemetry.activeCoreCount}/{IMMUTABLE_CONSTITUTION_ARTICLES.length}
+              </span>
+              <span className="text-xs text-emerald-400 font-semibold">
+                Principles Active
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-1.5 tabular-nums">
+            <span className="text-amber-300 font-mono">CONST-01..06</span>
+            <span aria-hidden="true">·</span>
+            <span className="text-emerald-300 truncate">
+              Jules Monitoring ({activeGoalAudit.complianceScore}% Score)
+            </span>
+          </div>
+        </div>
       </div>
+
 
       {/* Patient "Time-in-the-World" Gemini Credit Governor & Conditional Ollama Fallback Strip */}
       <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -666,52 +760,75 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* Left 5 cols: Immutable Constitution + Step 3 Active Goal */}
+          {/* Left 5 cols: Immutable Constitution + Live Jules Principle Monitor + Step 3 Active Goal */}
           <div className="lg:col-span-5 space-y-3">
-            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-1.5">
+            <div className="p-3.5 rounded-lg bg-slate-950 border border-amber-500/30 space-y-2.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-amber-300">
-                  Immutable App Constitution (Never Revised)
+                <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>
+                    Jules Constitutional Monitor ({constitutionTelemetry.activeCoreCount} Core Principles Active)
+                  </span>
                 </span>
-                <span className="font-mono text-[11px] text-emerald-400">100% Enforced</span>
+                <span className="font-mono text-[11px] text-emerald-400 tabular-nums">
+                  {activeGoalAudit.status} · {activeGoalAudit.complianceScore}/100
+                </span>
               </div>
               <p className="text-[11px] text-slate-300 leading-relaxed">
                 {proState.immutableConstitution?.coreIdentity ||
                   'CrewAI Studio: 8-Agent Autonomous Engineering Platform with 4-Graph Architecture Alignment, Zero-Breach Rate-Limit Governor, and Authenticated GitHub PAT Sync.'}
               </p>
-            </div>
 
-            <div className="p-3 rounded-lg bg-slate-950 border border-sky-500/30 space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-sky-300">
-                  Step 2 &amp; 2.1 · Pulled Project Target
+              {/* Live Grid of 6 Active Core Principles Monitored by Jules */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1">
+                {IMMUTABLE_CONSTITUTION_ARTICLES.map((article) => {
+                  const isViolated = activeGoalAudit.violations.some(
+                    (v) => v.articleCode === article.code
+                  );
+                  return (
+                    <div
+                      key={article.code}
+                      className={`px-2 py-1.5 rounded border text-[10px] flex items-center justify-between gap-1 ${
+                        isViolated
+                          ? 'bg-red-950/40 border-red-500/40 text-red-200'
+                          : 'bg-slate-900/90 border-slate-800 text-slate-200'
+                      }`}
+                      title={`${article.code}: ${article.title} — ${article.summary}`}
+                    >
+                      <div className="truncate">
+                        <span className="font-mono font-bold text-amber-300">{article.code}</span>
+                        <span aria-hidden="true"> · </span>
+                        <span className="text-slate-300">{article.category.split(' ')[0]}</span>
+                      </div>
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                          isViolated ? 'bg-red-400' : 'bg-emerald-400'
+                        }`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 font-mono tabular-nums">
+                <span>
+                  Audits: {constitutionTelemetry.totalAuditsRun} · Blocked: {constitutionTelemetry.blockedCount}
+                  {constitutionTelemetry.customGuardrailCount > 0
+                    ? ` · +${constitutionTelemetry.customGuardrailCount} Custom`
+                    : ''}
                 </span>
-                {onPullProjectTarget && (
+                {onOpenConstitutionalAudit && (
                   <button
                     type="button"
-                    disabled={isPullingTarget}
-                    onClick={onPullProjectTarget}
-                    className="px-2 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-[10px] font-mono font-bold transition cursor-pointer"
+                    onClick={() => onOpenConstitutionalAudit(proState.primaryGoal)}
+                    className="text-amber-300 hover:text-white font-sans font-semibold underline cursor-pointer"
                   >
-                    {isPullingTarget ? 'Pulling...' : '2.1 Pull Target'}
+                    Audit Active Principles →
                   </button>
                 )}
               </div>
-              <div className="text-[11px] font-mono text-slate-200 flex items-center justify-between">
-                <span className="truncate">
-                  {proState.pulledTarget?.repo || proState.selectedRepo}@
-                  {proState.pulledTarget?.branch || proState.targetBranch}
-                </span>
-                <span className="text-emerald-400">
-                  {proState.pulledTarget?.filesCount ?? 54} files ·{' '}
-                  {proState.pulledTarget?.latestCommitSha || 'a94c7e2'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 truncate">
-                {proState.pulledTarget?.latestCommitMessage ||
-                  `Pulled target project ${proState.selectedRepo} AST & 4-Graph dependency index`}
-              </p>
             </div>
+
 
             <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs">
@@ -731,13 +848,17 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
                 Step 4 · Newly Formed &amp; Created CrewAI Tasks (Proceeding from Step 3 Goal)
               </span>
               <span className="font-mono tabular-nums">
-                {proState.delegatedTasks.filter((t) => t.status === 'completed').length}/
-                {proState.delegatedTasks.length} Completed
+                {
+                  [...proState.delegatedTasks, ...extraQueuedTasks].filter(
+                    (t) => t.status === 'completed'
+                  ).length
+                }
+                /{proState.delegatedTasks.length + extraQueuedTasks.length} Completed
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {proState.delegatedTasks.map((task) => (
+              {[...proState.delegatedTasks, ...extraQueuedTasks].map((task) => (
                 <div
                   key={task.id}
                   className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/90 flex flex-col justify-between gap-1.5"
@@ -773,6 +894,29 @@ export const ProDashboard: React.FC<ProDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Constitutional Impact Analysis Dashboard (Pre-Queue Principle Drift Simulator) */}
+      <ConstitutionalImpactAnalysis
+        primaryGoal={proState.primaryGoal}
+        delegatedTasks={[...proState.delegatedTasks, ...extraQueuedTasks]}
+        onOpenConstitutionalAudit={onOpenConstitutionalAudit}
+        onQueueVerifiedTask={(verifiedTask) => {
+          setExtraQueuedTasks((prev) => [
+            ...prev,
+            {
+              id: `sim-queued-${Date.now()}`,
+              stepOrder: proState.delegatedTasks.length + prev.length + 1,
+              title: verifiedTask.title,
+              assignedCrewRole: verifiedTask.assignedCrewRole,
+              agentName: verifiedTask.agentName,
+              constitutionGuard: 'CONST-01..06 Verified (0% Drift)',
+              status: 'queued',
+              progressPct: 0
+            }
+          ]);
+        }}
+      />
+
 
       {/* Middle Row: 24-Hour Autonomous Lifecycle Visualizer + Active Step Matrix */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

@@ -67,6 +67,64 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
 
   const [activeCrew, setActiveCrew] = useState<CrewConfig>(loadActiveCrew);
   const alignedModules = useMemo(() => buildAlignedGraphifyModules(activeCrew), [activeCrew]);
+  const [realDiskAstMode, setRealDiskAstMode] = useState<boolean>(true);
+  const [realDiskNodes, setRealDiskNodes] = useState<RepoNode[]>([]);
+  const [loadingDiskAst, setLoadingDiskAst] = useState<boolean>(false);
+
+  const fetchRealDiskAst = useCallback(async (forceRescan = false) => {
+    setLoadingDiskAst(true);
+    try {
+      const res = await fetch(forceRescan ? '/api/fullstack/ast/scan' : '/api/fullstack/ast/latest', {
+        method: forceRescan ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: forceRescan ? JSON.stringify({ maxFiles: 35 }) : undefined
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+        const rawEdges: Array<{ from: string; to: string }> = Array.isArray(data.edges) ? data.edges : [];
+        const mapped: RepoNode[] = data.nodes.map((n: any, i: number) => {
+          const outbound = rawEdges.filter((e) => e.from === n.id).map((e) => e.to);
+          const inbound = rawEdges.filter((e) => e.to === n.id).map((e) => e.from);
+          const assignedAgent = activeCrew.agents[i % Math.max(1, activeCrew.agents.length)];
+          const layerMap: Record<string, RepoNode['layer']> = {
+            core_runtime: 'data',
+            backend_api: 'config',
+            ui_component: 'ui',
+            utilities: 'types'
+          };
+          return {
+            id: n.id,
+            name: n.name,
+            path: `/${n.path}`,
+            layer: layerMap[n.layer] || 'data',
+            layerLabel: n.language === 'python' ? 'Python 3.10 AST' : 'TypeScript AST',
+            domainCategory: n.language === 'python' ? 'backend' : 'frontend',
+            type: n.layer === 'ui_component' ? 'component' : n.layer === 'backend_api' ? 'config' : 'store',
+            loc: Number(n.lines || 0),
+            description: `Real parsed ${n.language.toUpperCase()} AST on disk • Cyclomatic Complexity: ${n.complexity} • Classes: ${(n.classes || []).slice(0, 3).join(', ') || 'none'}`,
+            inbound,
+            outbound,
+            exports: [...(n.classes || []), ...(n.functions || [])].slice(0, 8),
+            x: Number(n.x || 80 + (i % 5) * 290),
+            y: Number(n.y || 80 + Math.floor(i / 5) * 210),
+            assignedAgentId: assignedAgent?.id,
+            assignedAgentName: assignedAgent?.name,
+            assignedAgentRole: assignedAgent?.role
+          };
+        });
+        setRealDiskNodes(mapped);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingDiskAst(false);
+    }
+  }, [activeCrew.agents]);
+
+  useEffect(() => {
+    fetchRealDiskAst(false);
+  }, [fetchRealDiskAst]);
 
   const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
   const [selectedNodeId, setSelectedNodeId] = useState<string>(focusedModuleId || 'unified-graph-engine-ts');
@@ -100,13 +158,14 @@ export const GraphifyRepoVisualizer: React.FC<GraphifyRepoVisualizerProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Merge base aligned modules with any user drag position overrides
+  // Merge base aligned modules (or Real Disk AST modules) with any user drag position overrides
   const nodes: RepoNode[] = useMemo(() => {
-    return alignedModules.map((mod) => {
+    const baseList = realDiskAstMode && realDiskNodes.length > 0 ? realDiskNodes : alignedModules;
+    return baseList.map((mod) => {
       const override = positionOverrides[mod.id];
       return override ? { ...mod, x: override.x, y: override.y } : mod;
     });
-  }, [alignedModules, positionOverrides]);
+  }, [alignedModules, realDiskAstMode, realDiskNodes, positionOverrides]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[0];
 
@@ -380,6 +439,31 @@ python -m graphify scan . --crew "${activeCrew.name}" --output repo_graph.json -
             <option value="types">Types & Contracts</option>
             <option value="config">Backend & Standalone</option>
           </select>
+
+          <button
+            onClick={() => setRealDiskAstMode((prev) => !prev)}
+            className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+              realDiskAstMode
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+            }`}
+            title="Toggle between Real Parsed Disk AST (Python 3.10 ast + TS) and Aligned Architecture Modules"
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>{realDiskAstMode ? `Real Disk AST (${realDiskNodes.length} files)` : 'Aligned Mode'}</span>
+          </button>
+
+          {realDiskAstMode && (
+            <button
+              onClick={() => fetchRealDiskAst(true)}
+              disabled={loadingDiskAst}
+              className="px-2.5 py-1.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-xs text-purple-300 hover:bg-purple-600/30 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              title="Run live Python 3.10 ast + TypeScript disk scan and save snapshot to SQLite"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${loadingDiskAst ? 'animate-spin' : ''}`} />
+              <span>{loadingDiskAst ? 'Scanning...' : 'Rescan Disk'}</span>
+            </button>
+          )}
 
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}

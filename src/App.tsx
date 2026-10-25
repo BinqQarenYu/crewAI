@@ -15,9 +15,15 @@ import { SearchModal } from './components/SearchModal';
 import { AgentPromptModal } from './components/AgentPromptModal';
 import { OllamaPoolModal } from './components/OllamaPoolModal';
 import { GitHubHub } from './components/GitHubHub';
+import { JulesAgentModal } from './components/JulesAgentModal';
 import { ApiDiagnosticsModal } from './components/ApiDiagnosticsModal';
+import { AntigravityRemoteScanModal } from './components/AntigravityRemoteScanModal';
+import { ProModeModal } from './components/ProModeModal';
+import { FullstackRuntimeModal } from './components/FullstackRuntimeModal';
+import { ConstitutionalAuditModal } from './components/ConstitutionalAuditModal';
 import { GlobalCardMinMaxEnhancer } from './components/CardMinMaxControl';
 import { globalTaskThrottler } from './utils/taskThrottler';
+
 
 // Install global API polling coalescer, TTL cache, and background task concurrency throttler
 globalTaskThrottler.installGlobalFetchThrottler();
@@ -33,6 +39,14 @@ export const App: React.FC = () => {
   const [isJulesOpen, setIsJulesOpen] = useState<boolean>(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState<boolean>(false);
   const [isProModeOpen, setIsProModeOpen] = useState<boolean>(false);
+  const [isFullstackOpen, setIsFullstackOpen] = useState<boolean>(false);
+  const [isConstitutionalAuditOpen, setIsConstitutionalAuditOpen] = useState<boolean>(false);
+  const [constitutionalInit, setConstitutionalInit] = useState<{
+    prompt?: string;
+    testCommand?: string;
+    targetPath?: string;
+  }>({});
+
   const [isRemoteScanOpen, setIsRemoteScanOpen] = useState<boolean>(() => {
     return typeof window !== 'undefined' && window.location.search.includes('antigravity_remote');
   });
@@ -48,7 +62,7 @@ export const App: React.FC = () => {
 
   // Lifted GitHub state
   const [selectedRepo, setSelectedRepo] = useState<string>(
-    () => localStorage.getItem('crewai_selected_repo') || 'BinqQarenYu/crewAI'
+    () => localStorage.getItem('crewai_selected_repo') || 'bingkltech/crewAI'
   );
   const [selectedBranch, setSelectedBranch] = useState<string>(
     () => localStorage.getItem('crewai_selected_branch') || 'main'
@@ -109,8 +123,13 @@ export const App: React.FC = () => {
         setIsSearchOpen((prev) => !prev);
       }
     };
+    const handleOpenFullstack = () => setIsFullstackOpen(true);
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('crewai:open-fullstack-console', handleOpenFullstack);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('crewai:open-fullstack-console', handleOpenFullstack);
+    };
   }, []);
 
   const toggleBookmark = (pageId: string) => {
@@ -157,6 +176,11 @@ export const App: React.FC = () => {
         onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
         onOpenRemoteScan={() => setIsRemoteScanOpen(true)}
         onOpenProMode={() => setIsProModeOpen(true)}
+        onOpenFullstackConsole={() => setIsFullstackOpen(true)}
+        onOpenConstitutionalAudit={() => {
+          setConstitutionalInit({});
+          setIsConstitutionalAuditOpen(true);
+        }}
         selectedRepo={selectedRepo}
         selectedBranch={selectedBranch}
         language={language}
@@ -164,6 +188,7 @@ export const App: React.FC = () => {
         version={version}
         onVersionChange={setVersion}
       />
+
 
       {/* Unified 4-Graph Architecture Alignment Bar (Task DAG ↔ LangGraph ↔ Flow DAG ↔ Graphify) */}
       <UnifiedGraphAlignmentBar
@@ -333,13 +358,83 @@ export const App: React.FC = () => {
         onSelectPoolModel={() => setCurrentTab('studio')}
       />
 
+      <JulesAgentModal
+        isOpen={isJulesOpen}
+        onClose={() => setIsJulesOpen(false)}
+        context={julesContext}
+        selectedRepo={selectedRepo}
+        selectedBranch={selectedBranch}
+        onOpenConstitutionalAudit={(payload) => {
+          setConstitutionalInit(payload);
+          setIsConstitutionalAuditOpen(true);
+        }}
+      />
+
       <ApiDiagnosticsModal
         isOpen={isDiagnosticsOpen}
         onClose={() => setIsDiagnosticsOpen(false)}
       />
 
+      <AntigravityRemoteScanModal
+        isOpen={isRemoteScanOpen}
+        onClose={() => setIsRemoteScanOpen(false)}
+        currentTab={currentTab}
+        onTabChange={(tab) => setCurrentTab(tab)}
+        selectedRepo={selectedRepo}
+        selectedBranch={selectedBranch}
+        initialMode={remoteScanInitialMode}
+      />
+
+      <ProModeModal
+        isOpen={isProModeOpen}
+        onClose={() => setIsProModeOpen(false)}
+        selectedRepo={selectedRepo}
+        selectedBranch={selectedBranch}
+        onRepoChange={(repo) => {
+          setSelectedRepo(repo);
+          localStorage.setItem('crewai_selected_repo', repo);
+        }}
+        onBranchChange={(branch) => {
+          setSelectedBranch(branch);
+          localStorage.setItem('crewai_selected_branch', branch);
+        }}
+        onOpenConstitutionalAudit={(goalPrompt) => {
+          setConstitutionalInit({
+            prompt: goalPrompt,
+            testCommand: 'pytest tests/ -v'
+          });
+          setIsConstitutionalAuditOpen(true);
+        }}
+      />
+
+      <FullstackRuntimeModal
+        isOpen={isFullstackOpen}
+        onClose={() => setIsFullstackOpen(false)}
+        selectedRepo={selectedRepo}
+        selectedBranch={selectedBranch}
+      />
+
+      <ConstitutionalAuditModal
+        isOpen={isConstitutionalAuditOpen}
+        onClose={() => setIsConstitutionalAuditOpen(false)}
+        initialGoal={constitutionalInit.prompt}
+        initialTestCommand={constitutionalInit.testCommand}
+        initialTargetPath={constitutionalInit.targetPath}
+        onDispatchCompliantGoalToJules={(verified) => {
+          setIsConstitutionalAuditOpen(false);
+          setJulesContext({
+            targetType: 'module',
+            targetName: verified.targetPath || 'Constitutional Verified Task',
+            targetPath: verified.targetPath || 'lib/crewai/src/crewai/utilities/agent_utils.py',
+            suggestedPrompt: verified.prompt
+          });
+          setIsJulesOpen(true);
+        }}
+      />
+
       <GlobalCardMinMaxEnhancer />
     </div>
+
   );
 };
 

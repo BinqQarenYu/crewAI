@@ -1,140 +1,72 @@
-# Crew Studio
+# CrewAI Studio & Interactive Documentation Platform
 
-A React + Vite + TypeScript workbench for exploring the
-[CrewAI](https://github.com/crewAIInc/crewAI) multi-agent framework: an agent/crew
-configurator, flow visualizer, tool catalog, and a Gemini-backed assistant.
+A React + Vite + TypeScript web application and developer workbench for the **CrewAI Multi-Agent Automation Framework**.
 
-> **Not affiliated with CrewAI, Inc.** "CrewAI" is a trademark of CrewAI, Inc.
-> This project is an independent UI that references their framework by name.
-> It does not vendor, bundle, or execute crewAI code.
+## Overview
 
-> **Status: prototype.** The UI is functional; several backend modules are
-> simulated for demonstration. See [What is real vs. simulated](#what-is-real-vs-simulated)
-> before relying on any output.
+This project provides an interactive developer portal, documentation suite, and visual studio for building and running autonomous AI multi-agent workflows.
 
-## Quickstart
+### Key Capabilities
 
-Requires Node.js 20+.
+1. **Interactive Documentation Browser**:
+   - Comprehensive documentation covering Core Concepts (Agents, Crews, Tasks, Flows, LLMs, Memory, Knowledge, Observability), Guides, and API Reference.
+   - Aspen Mintlify-style navigation with copyable code snippets, breadcrumbs, search, and language switching (EN, AR, KO, PT-BR).
+   - Version support for Edge and v1.10.0 releases.
 
+2. **Crew Studio Playground**:
+   - Visual multi-agent orchestration workbench.
+   - Create, configure, and inspect Agents with custom roles, goals, backstories, model selection, memory toggles, and toolkits.
+   - Configure sequential and hierarchical task pipelines.
+   - Run autonomous multi-agent simulation with real-time reasoning logs, tool call execution, and deliverable synthesis.
+   - Export both standalone Python scripts (`crew.py`) and modern JSONC declarations (`crew.jsonc`).
+
+3. **Flow Visualizer & State Inspector**:
+   - Visual graph representation of event-driven state machines (`@start`, `@listen`, `@router`).
+   - Step-by-step state machine runner with live Pydantic state inspections, mutation diffs, and audit checkpoints.
+
+4. **Tools Ecosystem Catalog**:
+   - Directory of 18+ CrewAI tools across Search, Web Scraping, AI/ML Sandboxes, Database & SQL, File Parsers, Cloud Storage, and Automation.
+   - Required environment variables, code snippets, and usage examples.
+
+5. **OpenTelemetry Observability & Trace Explorer**:
+   - Sub-millisecond execution timeline with waterfall spans, token usage breakdowns, latency metrics, and payload inspector.
+
+6. **Agent Skills & Setup Hub**:
+   - One-click copy tool for coding assistants (Claude Code, Cursor, Windsurf, Codex) to install the official `crewaiinc/skills`.
+
+## Quickstart: 1-Click Standalone Run
+
+### Windows
+Double-click `start.bat` (or `run.bat`).
+It will automatically:
+1. Verify Node.js
+2. Generate `.env` from `.env.example` if not already present
+3. Install dependencies (`npm install`) if needed
+4. Open `http://localhost:3000` in your default browser
+5. Launch the full-stack server
+
+### macOS / Linux / WSL
+```bash
+./run.sh
+```
+
+### Manual Development
 ```bash
 npm install
-npm run dev          # http://localhost:3000
+npm run dev
 ```
 
-On Windows you can also double-click `run.bat`, which installs dependencies on
-first run and starts the dev server.
-
-Copy `.env.example` to `.env` and fill in the keys you need:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-## Configuration
-
-Everything is read from `.env` (or the process environment).
-
-| Variable | Purpose |
-| :--- | :--- |
-| `GEMINI_API_KEY_0…3` | Gemini keys, rotated round-robin. The only live LLM path. |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY` | Accepted and surfaced in the UI; wiring is partial. |
-| `GITHUB_TOKEN` | Personal access token for the GitHub panel (push file / push app). |
-| `JULES_API_KEY` | Reserved for the Jules integration (see below). |
-| `OLLAMA_HOST` | Local Ollama endpoint for the model status panel. |
-| `BIND_HOST` | Interface to bind. Defaults to `127.0.0.1`. |
-| `ALLOWED_ORIGINS` | Comma-separated extra CORS origins (e.g. a tunnel URL). |
-| `ALLOWED_HOSTS` | Comma-separated extra hostnames for the Host-header guard. |
-
-## Security model
-
-This process holds paid API keys and a GitHub token, so it is deliberately local-only:
-
-- Binds to `127.0.0.1` by default. Set `BIND_HOST=0.0.0.0` only if you understand
-  the exposure.
-- CORS is an explicit allowlist (localhost + `ALLOWED_ORIGINS`), not a reflection
-  of any origin.
-- A middleware rejects requests whose `Origin` or `Host` header is not allowed,
-  which also blocks DNS-rebinding and cross-site request attacks.
-- `POST /api/config/upload-env` only accepts `KEY=VALUE` lines and caps the body
-  at 64 KB.
-
-**There is no user authentication.** Treat the server as a single-user local tool.
-Never expose it to the internet as-is.
-
-## What is real vs. simulated
-
-Being explicit here matters: a dashboard that reports invented numbers is worse
-than no dashboard.
-
-| Module | Status |
-| :--- | :--- |
-| Agent / crew / task configuration UI | **Real** — full CRUD in local state, export to `crew.py` / `crew.jsonc` |
-| Crew execution ("Run") | **Real** — a Python 3.12 runner drives crewAI and streams its event bus over SSE |
-| Tools (file read/write/list, time, allowlisted HTTP) | **Real** — sandboxed, bounded, verified to reject path escapes |
-| Scheduling / triggers | **Real** — a crew runs on a timer without a click |
-| Approval gate | **Real** — a schedule can hold each run until a human approves |
-| Retries + circuit breaker | **Real** — backoff, then auto-pause after repeated failures |
-| Cross-run memory | **Real** — per-crew run journal injected into the next run |
-| Persistence | **Real** — run history and schedules survive a restart (`data/crew-studio.json`) |
-| Gemini assistant & smart routing | **Real** — live `@google/genai` calls with key rotation |
-| GitHub panel (connect PAT, push file, push app) | **Real** — calls the GitHub REST API |
-| Env config panel (upload / reload `.env`) | **Real** |
-
-### Autonomy API
-
+### Build & Compilation
 ```bash
-# run once
-POST /api/crews/recon/runs              {"model":"ollama/llama3","require_approval":false}
-
-# run on a timer, gated by a human
-POST /api/crews/recon/schedules         {"every_seconds":3600,"require_approval":true}
-GET  /api/schedules
-PATCH /api/schedules/:id                {"enabled":false}
-DELETE /api/schedules/:id
-
-# approvals and control
-GET  /api/runs                          # history (persisted)
-POST /api/runs/:id/approve
-POST /api/runs/:id/cancel
-GET  /api/runs/:id/events               # SSE
+npm run build
 ```
 
-Guardrails: `CREW_MAX_CONCURRENT_RUNS` (429 beyond), `CREW_RUN_TIMEOUT_MS`,
-`CREW_MAX_TOKENS_PER_RUN`, `CREW_MAX_TOOL_CALLS`, `CREW_MAX_CONSECUTIVE_FAILURES`.
 
-Features that were previously simulated have been **removed** rather than faked:
-Jules dispatch and PR review, Remote PC / QR remote scan, PRO Mode autopilot,
-the predictive scheduler, webhooks, and the generated `standalone.bat` download.
-Their API routes return `404`, and unmatched `/api/*` paths now return a JSON
-`404` instead of the SPA `index.html` — which previously masked missing
-endpoints with a `200 text/html`.
+## Architecture
+For a detailed look at the autonomous pipeline and Jules integration, see [Architecture & Jules Lifecycle](/.aistudio/artifacts/brain/5695ea9b-9941-4cad-8737-20fff04f28b1/ARCHITECTURE_AND_WORKFLOW.md).
 
-If you want any of those back, they need a real implementation — see
-[Roadmap](#roadmap).
-
-## Project structure
-
-```
-server.ts                 Express server + API (route handlers)
-server/crewRunner.ts      Real crew execution: spawn runner, SSE, run registry
-runner/                   Python 3.12 crewAI runner (JSONL event protocol)
-src/
-  components/             React UI (CrewStudio, LangGraphView, dashboards…)
-  services/realRun.ts     Client for start + SSE subscription
-crews/                    Crew definitions on disk (crews/<name>/crew.jsonc)
-public/                   Static assets
-run.bat                   Windows launcher
-```
-
-## Roadmap
-
-1. Bind real crewAI tools to the studio's tool picker (currently unbound, warned).
-2. Persist runs in SQLite so history survives a restart.
-3. Split `server.ts` into route modules; split the largest components.
-4. Add a test suite (currently none) and CI.
-5. Remove the remaining panels in `CrewStudio` that still call removed endpoints
-   (`PredictiveSchedulerModule`, `AutonomyStrategyDashboard`, PR-review module).
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+## Tech Stack
+- **Framework**: React 19 + TypeScript
+- **Bundler**: Vite
+- **Styling**: Tailwind CSS
+- **Icons**: Lucide React

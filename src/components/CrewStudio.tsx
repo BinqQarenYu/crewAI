@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AgentConfig, TaskConfig, CrewConfig, ExecutionLog, JulesContext, AuditCycleStage } from '../types';
-import { startRealRun } from '../services/realRun';
 import { TOOLS_CATALOG } from '../data/toolsCatalog';
 import { 
   Play, 
@@ -810,64 +809,8 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
   const [isGuideMode, setIsGuideMode] = useState<boolean>(true);
   const [guideStep, setGuideStep] = useState<SpoonFeedStep>(1);
   const [isPushingPat, setIsPushingPat] = useState<boolean>(false);
-  const [isPullingStep21, setIsPullingStep21] = useState<boolean>(false);
-  const [pulledStep21Meta, setPulledStep21Meta] = useState<{
-    repo: string;
-    branch: string;
-    filesCount: number;
-    latestCommitSha: string;
-    pulledAt: string;
-  }>({
-    repo: selectedRepo || 'bingkltech/crewAI',
-    branch: selectedBranch || 'main',
-    filesCount: 54,
-    latestCommitSha: 'a94c7e2',
-    pulledAt: 'Synced'
-  });
   const [suggestingTaskId, setSuggestingTaskId] = useState<string | null>(null);
   const pendingPushAfterEnvRef = useRef<boolean>(false);
-
-  const handlePullProjectTargetStep21 = async () => {
-    setIsPullingStep21(true);
-    try {
-      const res = await fetch('/api/pro/pull-target', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedRepo: selectedRepo || 'bingkltech/crewAI'
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const pulled = data.pulledTarget || data.state?.pulledTarget;
-        if (pulled) {
-          setPulledStep21Meta({
-            repo: pulled.repo || selectedRepo,
-            branch: pulled.branch || selectedBranch,
-            filesCount: pulled.filesCount || 54,
-            latestCommitSha: pulled.latestCommitSha || 'a94c7e2',
-            pulledAt: pulled.pulledAt || 'Just now'
-          });
-        }
-        if (data.state) {
-          window.dispatchEvent(
-            new CustomEvent('crewai:pro-status-updated', { detail: data.state })
-          );
-        }
-        showNotification(
-          'success',
-          `Step 2.1 Complete: Pulled project target ${pulled?.repo || selectedRepo}@${pulled?.branch || selectedBranch} (${pulled?.filesCount || 54} files, commit ${pulled?.latestCommitSha || 'latest'}).`
-        );
-      }
-    } catch {
-      showNotification(
-        'success',
-        `Step 2.1: Synced project target ${selectedRepo}@${selectedBranch} snapshot.`
-      );
-    } finally {
-      setIsPullingStep21(false);
-    }
-  };
 
   const suggestImprovement = async (task: TaskConfig) => {
     setSuggestingTaskId(task.id);
@@ -1126,6 +1069,21 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
       setLogs(buildSampleCycleLogs(crew, runInput));
     }
   }, [buildSampleCycleLogs, crew, logs.length, runInput]);
+
+  // Automatically persist active Crew configuration to the server's ACID SQLite database (.crewai-fullstack.db)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetch('/api/fullstack/db/crews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'active_workspace_crew',
+          crew
+        })
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [crew]);
 
   // Initialize & sync heartbeat entries whenever crew.agents changes
   useEffect(() => {
@@ -2141,99 +2099,6 @@ export const CrewStudio: React.FC<CrewStudioProps> = ({
     setLiveProgressPct(5);
     setExecElapsedMs(0);
     setLogs([]);
-
-    // --- Real execution path -------------------------------------------------
-    // Try the actual crewAI runner first. Only when the Python runner is not
-    // installed does this fall through to the offline simulator below, and the
-    // user is told so in the log rather than shown invented telemetry.
-    const initialRealTasks: Record<string, LiveTaskExecutionItem> = {};
-    crew.tasks.forEach((t, idx) => {
-      const assigned =
-        crew.agents.find((a) => a.id === t.agentId) ||
-        crew.agents[idx % Math.max(1, crew.agents.length)];
-      initialRealTasks[t.id] = {
-        taskId: t.id,
-        taskName: t.name,
-        phase: t.phase,
-        agentId: assigned?.id || '',
-        agentName: assigned?.name || `Agent ${idx + 1}`,
-        agentRole: assigned?.role || 'Specialist',
-        status: 'queued',
-        progressPct: 0,
-        durationMs: 0,
-        tokensUsed: 0
-      };
-    });
-
-    // crewAI reports task *descriptions*; map those back onto studio task ids.
-    const realTaskIdFor = (label: string): string | null => {
-      const direct = crew.tasks.find((t) => t.id === label);
-      if (direct) return direct.id;
-      const described = crew.tasks.find((t) => t.description === label || t.name === label);
-      return described ? described.id : null;
-    };
-
-    setTaskExecutions(initialRealTasks);
-    setActiveExecTaskId(crew.tasks[0]?.id || null);
-    setActiveExecAgentId(crew.agents[0]?.id || null);
-
-    const usedRealRunner = await startRealRun(
-      crew,
-      {
-        onLog: (log) => setLogs((prev) => [...prev.slice(-299), log]),
-        onTask: (taskLabel, status) => {
-          const id = realTaskIdFor(taskLabel);
-          if (!id) return;
-          setTaskExecutions((prev) => {
-            const existing = prev[id] || initialRealTasks[id];
-            if (!existing) return prev;
-            return {
-              ...prev,
-              [id]: {
-                ...existing,
-                status:
-                  status === 'running'
-                    ? 'reasoning'
-                    : status === 'completed'
-                      ? 'completed'
-                      : 'throttled',
-                progressPct: status === 'completed' ? 100 : 50
-              }
-            };
-          });
-          if (status === 'running') setActiveExecTaskId(id);
-        },
-        onProgress: (pct) => setLiveProgressPct(pct),
-        onDone: (result) => {
-          setExecElapsedMs(result.durationMs);
-          setIsRunning(false);
-          setActiveCycleStage(result.ok ? 'completed' : 'orchestrator');
-          if (!result.ok && result.error) {
-            setLogs((prev) => [
-              ...prev,
-              {
-                id: `run-error-${Date.now()}`,
-                timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
-                isoTimestamp: new Date().toISOString(),
-                stage: 'crew',
-                severity: 'error',
-                type: 'system',
-                title: 'Execution failed',
-                content: result.error
-              } as ExecutionLog
-            ]);
-          }
-          endHeavyKickoff();
-        }
-      },
-      { inputs: { topic: runInput } }
-    );
-
-    if (usedRealRunner) {
-      setExecElapsedMs(0);
-      return;
-    }
-
     const runLogsAccumulator: ExecutionLog[] = [];
     const runTraceId = `tr-${Math.random().toString(16).slice(2, 6)}`;
     let spanCounter = 1;
@@ -4093,7 +3958,7 @@ if __name__ == "__main__":
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Visual Agents & Tasks Builder (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Step 2 & 2.1 Contextual Guide Bubble + Crew Configuration & Pull Target Bar */}
+          {/* Step 2 Contextual Guide Bubble + Crew Configuration Bar */}
           <div id="guide-step-2" className="space-y-2">
             <ContextualGuideBubble
               step={2}
@@ -4104,158 +3969,114 @@ if __name__ == "__main__":
               onPrev={() => handleSelectGuideStep(1)}
               onDismiss={() => setIsGuideMode(false)}
               customActions={
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePullProjectTargetStep21}
-                    disabled={isPullingStep21}
-                    className="px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isPullingStep21 ? 'animate-spin' : ''}`} />
-                    <span>
-                      {isPullingStep21
-                        ? 'Step 2.1: Pulling Project Target...'
-                        : `Step 2.1: Pull Project Target (${selectedRepo}@${selectedBranch})`}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCrew((c) => ({ ...c, process: 'sequential' }));
-                      showNotification('success', 'Set teamwork mode to Sequential (Relay-Race Mode)! Moving to Step 3.');
-                      handleSelectGuideStep(3);
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Click Me: Use Beginner &ldquo;Sequential&rdquo; Mode &amp; Go to Step 3</span>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCrew((c) => ({ ...c, process: 'sequential' }));
+                    showNotification('success', 'Set teamwork mode to Sequential (Relay-Race Mode)! Moving to Step 3.');
+                    handleSelectGuideStep(3);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Click Me: Use Beginner "Sequential" Mode & Go to Step 3</span>
+                </button>
               }
             />
 
             <div
-              className={`p-4 rounded-xl bg-slate-900/60 border space-y-3 transition ${
+              className={`p-4 rounded-xl bg-slate-900/60 border flex flex-wrap items-center justify-between gap-4 transition ${
                 isGuideMode && guideStep === 2
                   ? 'border-[#EB6658] ring-2 ring-[#EB6658]/40 shadow-lg shadow-[#EB6658]/10'
                   : 'border-slate-800'
               }`}
             >
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-300">Project Name:</span>
-                    <input
-                      type="text"
-                      value={crew.name}
-                      onChange={(e) => setCrew((c) => ({ ...c, name: e.target.value }))}
-                      placeholder="My Custom Project Crew"
-                      className="bg-slate-950 border border-slate-700 focus:border-[#EB6658] rounded-lg px-2.5 py-1 text-xs text-white font-semibold outline-none w-48 sm:w-56"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-300">Process Mode:</span>
-                    <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-                      <button
-                        onClick={() => setCrew((c) => ({ ...c, process: 'sequential' }))}
-                        className={`px-3 py-1 rounded font-medium transition ${
-                          crew.process === 'sequential'
-                            ? 'bg-[#EB6658] text-white shadow-sm'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Sequential
-                      </button>
-                      <button
-                        onClick={() => setCrew((c) => ({ ...c, process: 'hierarchical' }))}
-                        className={`px-3 py-1 rounded font-medium transition ${
-                          crew.process === 'hierarchical'
-                            ? 'bg-[#EB6658] text-white shadow-sm'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Hierarchical
-                      </button>
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-300">Project Name:</span>
+                  <input
+                    type="text"
+                    value={crew.name}
+                    onChange={(e) => setCrew((c) => ({ ...c, name: e.target.value }))}
+                    placeholder="My Custom Project Crew"
+                    className="bg-slate-950 border border-slate-700 focus:border-[#EB6658] rounded-lg px-2.5 py-1 text-xs text-white font-semibold outline-none w-48 sm:w-56"
+                  />
                 </div>
 
-                <div className="flex items-center gap-4 text-xs">
-                  {crew.process === 'hierarchical' && (
-                    <div className="flex items-center gap-2 pr-4 border-r border-slate-800">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400 font-medium">Manager:</span>
-                        {providerStatus && !providerStatus[MODEL_PROVIDER_MAP[crew.managerModel || ''] || ''] && (
-                          <span className="flex items-center gap-1 text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 animate-pulse">
-                            <AlertTriangle className="w-3 h-3" />
-                            <span>Fallback</span>
-                          </span>
-                        )}
-                      </div>
-                      <select
-                        value={crew.managerModel || 'gemini/gemini-4-argon'}
-                        onChange={(e) => setCrew((c) => ({ ...c, managerModel: e.target.value }))}
-                        className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-[#EB6658]"
-                      >
-                        <option value="gemini/gemini-4-argon">Gemini 4 Argon (Paid Pro)</option>
-                        <option value="gemini/gemini-3.8-flash">Gemini 3.8 Flash (Free Pool)</option>
-                        <option value="gemini/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High Quota)</option>
-                        <option value="gemini/gemini-3-flash-preview">Gemini 3 Flash Preview</option>
-                        <option value="gpt-4o">GPT-4o</option>
-                        <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-                        <option value="groq/llama-3.3-70b">Groq 70B</option>
-                      </select>
-                    </div>
-                  )}
-
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={crew.memory}
-                      onChange={(e) => setCrew((c) => ({ ...c, memory: e.target.checked }))}
-                      className="rounded border-slate-700 text-[#EB6658] focus:ring-[#EB6658]"
-                    />
-                    <span>Shared Memory</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={crew.verbose}
-                      onChange={(e) => setCrew((c) => ({ ...c, verbose: e.target.checked }))}
-                      className="rounded border-slate-700 text-[#EB6658] focus:ring-[#EB6658]"
-                    />
-                    <span>Verbose Logging</span>
-                  </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-300">Process Mode:</span>
+                  <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+                    <button
+                      onClick={() => setCrew((c) => ({ ...c, process: 'sequential' }))}
+                      className={`px-3 py-1 rounded font-medium transition ${
+                        crew.process === 'sequential'
+                          ? 'bg-[#EB6658] text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Sequential
+                    </button>
+                    <button
+                      onClick={() => setCrew((c) => ({ ...c, process: 'hierarchical' }))}
+                      className={`px-3 py-1 rounded font-medium transition ${
+                        crew.process === 'hierarchical'
+                          ? 'bg-[#EB6658] text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Hierarchical
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Step 2.1: Pull Project Target Sub-Bar */}
-              <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[10px] font-mono font-bold">
-                    STEP 2.1
-                  </span>
-                  <span className="font-semibold text-white">Pull Project Target:</span>
-                  <span className="font-mono text-sky-300">
-                    {selectedRepo}@{selectedBranch}
-                  </span>
-                  <span className="text-[11px] font-mono text-emerald-400">
-                    ({pulledStep21Meta.filesCount} files · commit {pulledStep21Meta.latestCommitSha} · {pulledStep21Meta.pulledAt})
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handlePullProjectTargetStep21}
-                  disabled={isPullingStep21}
-                  className="px-3 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-500/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 text-sky-300 ${isPullingStep21 ? 'animate-spin' : ''}`} />
-                  <span>
-                    {isPullingStep21 ? 'Pulling Target...' : '2.1 Pull Project Target'}
-                  </span>
-                </button>
+              <div className="flex items-center gap-4 text-xs">
+                {crew.process === 'hierarchical' && (
+                  <div className="flex items-center gap-2 pr-4 border-r border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 font-medium">Manager:</span>
+                      {providerStatus && !providerStatus[MODEL_PROVIDER_MAP[crew.managerModel || ''] || ''] && (
+                        <span className="flex items-center gap-1 text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 animate-pulse">
+                          <AlertTriangle className="w-3 h-3" />
+                          <span>Fallback</span>
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={crew.managerModel || 'gemini/gemini-4-argon'}
+                      onChange={(e) => setCrew((c) => ({ ...c, managerModel: e.target.value }))}
+                      className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-[#EB6658]"
+                    >
+                      <option value="gemini/gemini-4-argon">Gemini 4 Argon (Paid Pro)</option>
+                      <option value="gemini/gemini-3.8-flash">Gemini 3.8 Flash (Free Pool)</option>
+                      <option value="gemini/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High Quota)</option>
+                      <option value="gemini/gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+                      <option value="gpt-4o">GPT-4o</option>
+                      <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+                      <option value="groq/llama-3.3-70b">Groq 70B</option>
+                    </select>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={crew.memory}
+                    onChange={(e) => setCrew((c) => ({ ...c, memory: e.target.checked }))}
+                    className="rounded border-slate-700 text-[#EB6658] focus:ring-[#EB6658]"
+                  />
+                  <span>Shared Memory</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={crew.verbose}
+                    onChange={(e) => setCrew((c) => ({ ...c, verbose: e.target.checked }))}
+                    className="rounded border-slate-700 text-[#EB6658] focus:ring-[#EB6658]"
+                  />
+                  <span>Verbose Logging</span>
+                </label>
               </div>
             </div>
           </div>
