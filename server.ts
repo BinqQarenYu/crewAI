@@ -1063,6 +1063,14 @@ function collectWorkspaceAppFiles(
     'metadata.json',
     'firebase-applet-config.json',
     '.env.example',
+    '.gitignore',
+    '.editorconfig',
+    '.pre-commit-config.yaml',
+    '.python-version',
+    'AGENTS.md',
+    'DOCS_TRANSLATIONS.md',
+    'LICENSE',
+    'conftest.py',
     'server.ts',
     ...(options?.excludeBatFiles ? [] : ['standalone.bat', 'start.bat', 'run.bat', 'run.sh']),
     'README.md'
@@ -1091,17 +1099,18 @@ function collectWorkspaceAppFiles(
     }
   }
 
-  const walkDir = (dirRel: string) => {
+  const walkDir = (dirRel: string, allowDotDir = false) => {
     const absDir = path.join(rootDir, dirRel);
     if (!fs.existsSync(absDir)) return;
     for (const entry of fs.readdirSync(absDir)) {
-      if (entry.startsWith('.') || entry === 'node_modules' || entry === 'dist') continue;
+      if ((!allowDotDir && entry.startsWith('.')) || entry === 'node_modules' || entry === 'dist') continue;
+      if (/^\.env(\..+)?$/i.test(entry)) continue;
       const relPath = path.posix.join(dirRel.replace(/\\/g, '/'), entry);
       const absPath = path.join(rootDir, relPath);
       const st = fs.statSync(absPath);
       if (st.isDirectory()) {
-        walkDir(relPath);
-      } else if (/\.(ts|tsx|js|jsx|css|json|md|html|svg)$/i.test(entry) && st.size < 600000) {
+        walkDir(relPath, allowDotDir);
+      } else if (/\.(ts|tsx|js|jsx|css|json|md|html|svg|py|yml|yaml|txt)$/i.test(entry) && st.size < 600000) {
         if (!seen.has(relPath)) {
           try {
             result.push({ path: relPath, content: fs.readFileSync(absPath, 'utf-8') });
@@ -1116,6 +1125,8 @@ function collectWorkspaceAppFiles(
 
   walkDir('src');
   walkDir('server');
+  walkDir('tests');
+  walkDir('.github', true);
 
   if (Array.isArray(extraFiles)) {
     for (const ef of extraFiles) {

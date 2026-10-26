@@ -1,45 +1,48 @@
-# Dependencies
 node_modules/
-
-# Build output
-dist/
-*.tsbuildinfo
-
-# Secrets & local env  (NEVER commit these)
-.env
-.env.local
-.env.*.local
-
-# Runtime state
-.pro-mode-state.json
-
-# Generated standalone launchers (superseded by `npm run dev` / run.bat)
-/start.bat
-/standalone.bat
-
-# Logs
-*.log
-npm-debug.log*
-yarn-error.log*
-
-# OS / editors
+.env*
+public/assets/aistudio/.env*
 .DS_Store
-Thumbs.db
-.vscode/
-.idea/
+.pytest_cache
+__pycache__
+dist/
+assets/*
+.idea
+test/
+docs_crew/
+chroma.sqlite3
+old_en.json
+db/
+test.py
+rc-tests/*
+*.pkl
+temp/*
+.vscode/*
+crew_tasks_output.json
+.codesight
+.mypy_cache
+.ruff_cache
+.venv
+test_flow.html
+crewairules.mdc
+plan.md
+conceptual_plan.md
+build_image
+chromadb-*.lock
+.claude
+.codex
+.crewai/memory
+blogs/*
+secrets/*
+UNKNOWN.egg-info/
+demos/*
+.crewai/*
+docs/images/
+docs/v*/
+public/images/
+*.tsbuildinfo
+.pro-mode-state.json
+.aistudio/
+start.bat
+.crewai-fullstack.db*
+.runtime_sandbox/
 
-# Python runner
-runner/.venv/
-__pycache__/
-*.py[cod]
-runner/*.jsonl
-runner/*.err
-runner/.last_run_id
-
-# Crew run artifacts
-crews/*/output/
-crews/*/memory.json
-.crew-workspace/
-
-# Persisted autonomy state (run history + schedules)
-data/
